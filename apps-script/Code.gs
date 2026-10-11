@@ -18,6 +18,7 @@ var FOLDER_NAME = 'PaymentOpsMonitor';
 var DATA_SHEETS = ['BDT-SSG-AGENT', 'BDT-SSG-PERSONAL', 'BDT-SSG-VIP', 'BDT-SSG-WITHDRAWAL-ONLY'];
 var ANALYTICS_SHEET = 'Analytics';
 var ANALYTICS_HEADER = ['DATE', 'CURRENCY', 'GATEWAY', 'DEPOSIT', 'WITHDRAWAL', 'NOTE'];
+var BACKUP_ROWS_PER_CHUNK = 1000;
 
 /* ------------------------------ entry points ------------------------------ */
 
@@ -57,8 +58,7 @@ function handle_(e, body) {
 
 function manifest_() {
   var mode = mode_();
-  var out = { mode: mode, source: null, updatedAt: null, sheets: [], analytics: [], settings: readJson_('settings.json') || {}, sheetError: null };
-
+  var out = { mode: mode, source: null, updatedAt: null, revision: null, sheets: [], analytics: [], settings: readJson_('settings.json') || {}, sheetError: null };
   var live = null;
   if (mode === 'auto') {
     try {
@@ -69,18 +69,19 @@ function manifest_() {
       live = null;
     }
   }
-
   if (live) {
     out.source = 'sheet';
     out.sheets = live.sheets;
-    out.updatedAt = new Date().toISOString();
-    backupIfStale_(live);          // keep Drive copy fresh (at most once an hour)
+    out.updatedAt = live.updatedAt;
+    out.revision = 'sheet:' + live.revision;
+    // Drive backups run from a time-driven trigger so dashboard initialization does not wait for backup I/O.
   } else {
     var meta = readJson_('meta.json');
     if (!meta) throw new Error('No data available: Google Sheet unreachable/empty and no Drive backup yet. ' + (out.sheetError || ''));
     out.source = 'drive';
     out.updatedAt = meta.importedAt || meta.backedUpAt;
-    out.sheets = meta.sheets; // [{name, header, rowCount}]
+    out.revision = 'drive:' + (meta.revision || meta.importedAt || meta.backedUpAt || 'unknown');
+    out.sheets = meta.sheets.map(function (s) { return { name: s.name, header: s.header, rowCount: s.rowCount, revision: s.revision || (meta.revision || meta.importedAt || meta.backedUpAt || 'legacy') }; });
   }
   out.analytics = readAnalytics_();
   return out;
@@ -97,11 +98,35 @@ function liveManifest_() {
     var header = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
     sheets.push({ name: name, header: header, rowCount: last - 1 });
   });
-  return { sheets: sheets };
+  var fileUpdated = DriveApp.getFileById(ss.getId()).getLastUpdated().getTime();
+  sheets.forEach(function (s) { s.revision = sheetRevision_(s.name, fileUpdated); });
+  var shape = sheets.map(function (s) { return s.name + ':' + s.rowCount + ':' + s.header.length + ':' + s.revision; }).join('|');
+  // Revision is based on monitored tabs, not the whole spreadsheet file, so saving daily analytics
+  // does not force a redownload of all operational records.
+  return { sheets: sheets, revision: shape, updatedAt: new Date(fileUpdated).toISOString() };
+}
+
+function sheetRevisionKey_(name) { return 'SHEET_REV_' + String(name).replace(/[^A-Za-z0-9_]/g, '_'); }
+function sheetRevision_(name, fallback) {
+  var p = props_();
+  var key = sheetRevisionKey_(name);
+  var value = p.getProperty(key);
+  if (!value) { value = String(fallback || Date.now()); p.setProperty(key, value); }
+  return value;
+}
+
+// Simple trigger: track edits made directly by a user in a monitored source tab.
+function onEdit(e) {
+  try {
+    var sh = e && e.range ? e.range.getSheet() : null;
+    if (sh && DATA_SHEETS.indexOf(sh.getName()) >= 0) props_().setProperty(sheetRevisionKey_(sh.getName()), String(Date.now()));
+  } catch (err) { /* manifest also falls back to a full refresh if revisions cannot be tracked */ }
 }
 
 function rows_(sheetName, offset, limit) {
   if (DATA_SHEETS.indexOf(sheetName) < 0) throw new Error('Unknown sheet');
+  offset = Math.max(0, Number(offset) || 0);
+  limit = Math.max(0, Math.min(10000, Number(limit) || 5000));
   var useLive = mode_() === 'auto';
   if (useLive) {
     try {
@@ -112,8 +137,27 @@ function rows_(sheetName, offset, limit) {
         var vals = n > 0 ? sh.getRange(2 + offset, 1, n, sh.getLastColumn()).getValues() : [];
         return { rows: vals.map(cleanRow_) };
       }
+      if (sh) return { rows: [] };
     } catch (err) { /* fall through to Drive */ }
   }
+  var meta = readJson_('meta.json');
+  var desc = meta && meta.sheets ? meta.sheets.filter(function (s) { return s.name === sheetName; })[0] : null;
+  if (desc && desc.chunks && desc.chunks.length) {
+    var out = [];
+    var end = offset + limit;
+    desc.chunks.forEach(function (c) {
+      var chunkStart = Number(c.startRow) || 0;
+      var chunkRows = Number(c.rowCount) || 0;
+      if (chunkStart >= end || chunkStart + chunkRows <= offset) return;
+      var part = readJson_(c.name);
+      if (!part || !Array.isArray(part.rows)) throw new Error('Drive backup chunk missing: ' + c.name);
+      var from = Math.max(0, offset - chunkStart);
+      var to = Math.min(part.rows.length, end - chunkStart);
+      if (to > from) out = out.concat(part.rows.slice(from, to));
+    });
+    return { rows: out };
+  }
+  // Backward compatibility with the previous single-JSON-file backup format.
   var data = readJson_('data-' + sheetName + '.json');
   if (!data) throw new Error('No Drive backup for ' + sheetName);
   return { rows: data.rows.slice(offset, offset + limit) };
@@ -128,55 +172,222 @@ function cleanRow_(r) {
 
 /* --------------------------- Drive backup of the sheet --------------------------- */
 
+// Run once from the Apps Script editor to keep Drive backups fresh without slowing manifest requests.
+function setupBackupTrigger() {
+  ScriptApp.getProjectTriggers().forEach(function (trigger) {
+    if (trigger.getHandlerFunction() === 'scheduledBackup') ScriptApp.deleteTrigger(trigger);
+  });
+  ScriptApp.newTrigger('scheduledBackup').timeBased().everyHours(1).create();
+  Logger.log('Hourly Drive backup trigger installed.');
+}
+
+function scheduledBackup() {
+  try {
+    var live = liveManifest_();
+    if (live.sheets.length) backupIfStale_(live);
+  } catch (err) { console.error('Scheduled backup failed: ' + err); }
+}
+
 function backupIfStale_(live) {
   try {
     var meta = readJson_('meta.json');
-    var now = Date.now();
-    if (meta && meta.backedUpAtMs && now - meta.backedUpAtMs < 60 * 60 * 1000) return;
-    if (meta && meta.fromExcel) return; // never overwrite an Excel import with a sheet backup silently
+    if (meta && meta.revision === live.revision && meta.sheets && meta.sheets.length) return;
     var ss = spreadsheet_();
-    var sheets = [];
+    var backupId = String(live.revision).replace(/[^A-Za-z0-9]/g, '').slice(-18) + '_' + Date.now();
+    var newSheets = [];
     live.sheets.forEach(function (s) {
       var sh = ss.getSheetByName(s.name);
-      var vals = sh.getRange(2, 1, sh.getLastRow() - 1, sh.getLastColumn()).getValues().map(cleanRow_);
-      writeJson_('data-' + s.name + '.json', { header: s.header, rows: vals });
-      sheets.push({ name: s.name, header: s.header, rowCount: vals.length });
+      if (!sh || sh.getLastRow() < 2) return;
+      var chunks = [];
+      var rowCount = sh.getLastRow() - 1;
+      for (var offset = 0, idx = 0; offset < rowCount; offset += BACKUP_ROWS_PER_CHUNK, idx++) {
+        var count = Math.min(BACKUP_ROWS_PER_CHUNK, rowCount - offset);
+        var vals = sh.getRange(2 + offset, 1, count, sh.getLastColumn()).getValues().map(cleanRow_);
+        var name = 'data-' + s.name + '-' + backupId + '-' + idx + '.json';
+        writeJson_(name, { sheet: s.name, startRow: offset, rows: vals });
+        chunks.push({ name: name, startRow: offset, rowCount: vals.length });
+      }
+      newSheets.push({ name: s.name, header: s.header, rowCount: rowCount, revision: s.revision, chunks: chunks });
     });
-    writeJson_('meta.json', { sheets: sheets, backedUpAt: new Date().toISOString(), backedUpAtMs: now, fromExcel: false });
-  } catch (err) { /* backup is best-effort */ }
+    var oldMeta = meta;
+    writeJson_('meta.json', { sheets: newSheets, backedUpAt: new Date().toISOString(), revision: live.revision, fromExcel: false });
+    trashOldDataFiles_(oldMeta, newSheets);
+  } catch (err) { /* best-effort backup; the live Google Sheet remains the source of truth */ }
 }
 
-/* ------------------------------ Excel import (chunked) ------------------------------ */
+function trashOldDataFiles_(oldMeta, newSheets) {
+  try {
+    var keep = {};
+    var keepSheets = {};
+    newSheets.forEach(function (s) {
+      keepSheets[s.name] = true;
+      (s.chunks || []).forEach(function (c) { keep[c.name] = true; });
+    });
+    if (oldMeta && oldMeta.sheets) oldMeta.sheets.forEach(function (s) {
+      (s.chunks || []).forEach(function (c) { if (!keep[c.name]) trash_(c.name); });
+      // Keep a legacy single-file backup for an untouched tab during an individual import.
+      if (!s.chunks && !keepSheets[s.name]) trash_('data-' + s.name + '.json');
+    });
+    // Remove legacy single-file backups only for tabs now represented by new chunk files.
+    newSheets.forEach(function (s) { if (s.chunks && s.chunks.length) trash_('data-' + s.name + '.json'); });
+  } catch (err) { /* cleanup can be retried on a later backup */ }
+}
 
-// body: {sheet, index, header?, rows}
+/* ------------------------------ Excel import (chunked, selected-tab aware) ------------------------------ */
+
+function safeImportId_(id) {
+  var v = String(id || '');
+  if (!/^[A-Za-z0-9_-]{8,80}$/.test(v)) throw new Error('Invalid import ID');
+  return v;
+}
+
+function stageChunkName_(importId, sheet, index) {
+  return 'stage-' + importId + '-' + sheet + '-' + index + '.json';
+}
+
+// body: {importId,sheet,index,header?,startRow,rows}; each chunk is stored separately to avoid rewriting a growing JSON file.
 function importChunk_(b) {
+  var importId = safeImportId_(b.importId);
   if (DATA_SHEETS.indexOf(b.sheet) < 0) throw new Error('Unknown sheet: ' + b.sheet);
-  var name = 'stage-' + b.sheet + '.json';
-  var stage = b.index === 0 ? { header: b.header, rows: [] } : readJson_(name);
-  if (!stage) throw new Error('Missing staging data for ' + b.sheet + ' (chunk ' + b.index + ')');
-  stage.rows = stage.rows.concat(b.rows);
-  writeJson_(name, stage);
-  return { ok: true, sheet: b.sheet, received: stage.rows.length };
+  if (!Array.isArray(b.rows) || !Number.isInteger(Number(b.index)) || Number(b.index) < 0) throw new Error('Invalid import chunk');
+  var index = Number(b.index);
+  if (index === 0 && (!Array.isArray(b.header) || !b.header.length)) throw new Error('The first chunk must include a header');
+  var chunk = { importId: importId, sheet: b.sheet, index: index, startRow: Number(b.startRow) || 0,
+    header: index === 0 ? b.header : undefined, rows: b.rows };
+  writeJson_(stageChunkName_(importId, b.sheet, index), chunk);
+  return { ok: true, importId: importId, sheet: b.sheet, index: index, received: b.rows.length };
 }
 
-// body: {sheets:[{name,header,rowCount}], fileName}
+function ensureSheetSize_(sh, rows, cols) {
+  if (sh.getMaxRows() < rows) sh.insertRowsAfter(sh.getMaxRows(), rows - sh.getMaxRows());
+  if (sh.getMaxColumns() < cols) sh.insertColumnsAfter(sh.getMaxColumns(), cols - sh.getMaxColumns());
+}
+
+function replaceGoogleSheetFromChunks_(sheetName, header, chunks, importId) {
+  var ss = spreadsheet_();
+  var target = ss.getSheetByName(sheetName);
+  var created = !target;
+  if (!target) target = ss.insertSheet(sheetName);
+  var backup = null;
+  var succeeded = false;
+  try {
+    if (!created) {
+      backup = target.copyTo(ss);
+      backup.setName(('__backup_' + importId + '_' + sheetName).slice(0, 99));
+    }
+    var totalRows = 1 + chunks.reduce(function (sum, c) { return sum + c.rowCount; }, 0);
+    ensureSheetSize_(target, Math.max(1, totalRows), Math.max(1, header.length));
+    target.clearContents();
+    target.getRange(1, 1, 1, header.length).setValues([header]);
+    var writeAt = 2;
+    chunks.forEach(function (c) {
+      var data = readJson_(c.stageName);
+      if (!data || !Array.isArray(data.rows)) throw new Error('Staged chunk missing: ' + c.stageName);
+      for (var i = 0; i < data.rows.length; i += BACKUP_ROWS_PER_CHUNK) {
+        var batch = data.rows.slice(i, i + BACKUP_ROWS_PER_CHUNK).map(function (row) {
+          var fixed = row.slice(0, header.length);
+          while (fixed.length < header.length) fixed.push('');
+          return fixed;
+        });
+        if (batch.length) {
+          ensureSheetSize_(target, writeAt + batch.length - 1, header.length);
+          target.getRange(writeAt, 1, batch.length, header.length).setValues(batch);
+          writeAt += batch.length;
+        }
+      }
+    });
+    succeeded = true;
+  } catch (err) {
+    if (backup) {
+      try {
+        target.clearContents();
+        var oldRange = backup.getDataRange();
+        ensureSheetSize_(target, oldRange.getNumRows(), oldRange.getNumColumns());
+        oldRange.copyTo(target.getRange(1, 1), { contentsOnly: true });
+      } catch (restoreErr) {
+        throw new Error('Sheet replacement failed and automatic restore also failed. Recovery copy remains as ' + backup.getName() + '. Original error: ' + err);
+      }
+    }
+    throw err;
+  } finally {
+    if (succeeded && backup) ss.deleteSheet(backup);
+    if (!succeeded && created) {
+      // Leave a newly-created tab in place only if the caller needs to inspect the failed import.
+    }
+  }
+}
+
+// body: {importId,sheets:[{name,rowCount,chunkCount}],fileName,replaceMode:'selected'|'all',targetSheet}
 function importCommit_(b) {
-  var sheets = [];
-  b.sheets.forEach(function (s) {
-    var stage = readJson_('stage-' + s.name + '.json');
-    if (!stage) throw new Error('Nothing staged for ' + s.name);
-    if (stage.rows.length !== s.rowCount) throw new Error(s.name + ': expected ' + s.rowCount + ' rows, got ' + stage.rows.length);
-    writeJson_('data-' + s.name + '.json', stage);          // replaces the previous copy
-    trash_('stage-' + s.name + '.json');
-    sheets.push({ name: s.name, header: stage.header, rowCount: stage.rows.length });
+  var importId = safeImportId_(b.importId);
+  if (!Array.isArray(b.sheets) || !b.sheets.length) throw new Error('No sheets supplied for import');
+  var selected = b.replaceMode === 'selected';
+  if (selected && (b.sheets.length !== 1 || b.sheets[0].name !== b.targetSheet)) throw new Error('Selected-tab import target does not match uploaded data');
+
+  // Validate every staged chunk before touching the live sheet.
+  var prepared = b.sheets.map(function (s) {
+    if (DATA_SHEETS.indexOf(s.name) < 0) throw new Error('Unknown sheet: ' + s.name);
+    var chunkCount = Number(s.chunkCount);
+    if (!Number.isInteger(chunkCount) || chunkCount < 1) throw new Error(s.name + ': invalid chunk count');
+    var chunks = [];
+    var expectedStart = 0;
+    var header = null;
+    for (var i = 0; i < chunkCount; i++) {
+      var name = stageChunkName_(importId, s.name, i);
+      var part = readJson_(name);
+      if (!part || part.importId !== importId || part.sheet !== s.name || Number(part.index) !== i || !Array.isArray(part.rows)) {
+        throw new Error(s.name + ': missing or invalid staged batch ' + (i + 1));
+      }
+      if (Number(part.startRow) !== expectedStart) throw new Error(s.name + ': staged batches are not contiguous');
+      if (i === 0) header = part.header;
+      expectedStart += part.rows.length;
+      chunks.push({ stageName: name, index: i, startRow: Number(part.startRow), rowCount: part.rows.length });
+    }
+    if (!header || !header.length) throw new Error(s.name + ': missing header');
+    if (expectedStart !== Number(s.rowCount)) throw new Error(s.name + ': expected ' + s.rowCount + ' rows, received ' + expectedStart);
+    return { name: s.name, header: header, rowCount: expectedStart, chunks: chunks };
   });
-  // drop backups for tabs that are not part of the new import
-  DATA_SHEETS.forEach(function (n) {
-    if (!sheets.some(function (s) { return s.name === n; })) trash_('data-' + n + '.json');
+
+  // Back up existing Google Sheets tabs and then replace only the target tab(s).
+  prepared.forEach(function (s) { replaceGoogleSheetFromChunks_(s.name, s.header, s.chunks, importId); });
+
+  // Promote staged chunks to versioned Drive backup files. The metadata switch happens only after sheet writes succeed.
+  var newDescriptors = prepared.map(function (s) {
+    var sheetRevision = String(Date.now());
+    props_().setProperty(sheetRevisionKey_(s.name), sheetRevision);
+    var chunks = s.chunks.map(function (c) {
+      var stageFile = file_(c.stageName);
+      if (!stageFile) throw new Error('Staged Drive file missing before promotion: ' + c.stageName);
+      var finalName = 'data-' + s.name + '-' + importId + '-' + c.index + '.json';
+      stageFile.setName(finalName);
+      return { name: finalName, startRow: c.startRow, rowCount: c.rowCount };
+    });
+    return { name: s.name, header: s.header, rowCount: s.rowCount, revision: sheetRevision, chunks: chunks };
   });
-  writeJson_('meta.json', { sheets: sheets, importedAt: new Date().toISOString(), fileName: b.fileName || '', fromExcel: true });
-  props_().setProperty('DATA_MODE', 'drive');               // serve the imported data until switched back
-  return { ok: true, mode: 'drive', sheets: sheets };
+
+  var oldMeta = readJson_('meta.json') || { sheets: [] };
+  var finalSheets;
+  if (selected) {
+    finalSheets = (oldMeta.sheets || []).filter(function (old) { return old.name !== newDescriptors[0].name; }).concat(newDescriptors);
+  } else {
+    finalSheets = newDescriptors;
+    // A full workbook replacement clears tabs omitted from the uploaded workbook.
+    DATA_SHEETS.forEach(function (name) {
+      if (newDescriptors.some(function (s) { return s.name === name; })) return;
+      var sh = spreadsheet_().getSheetByName(name);
+      if (sh) sh.clearContents();
+      trash_('data-' + name + '.json');
+    });
+  }
+  var ss = spreadsheet_();
+  var fileUpdated = DriveApp.getFileById(ss.getId()).getLastUpdated().getTime();
+  var live = liveManifest_();
+  writeJson_('meta.json', { sheets: finalSheets, importedAt: new Date().toISOString(), fileName: b.fileName || '',
+    revision: live.revision, fromExcel: false, backedUpAt: new Date().toISOString() });
+  // Old versions are no longer referenced by meta.json; remove them after the new version is committed.
+  trashOldDataFiles_(oldMeta, finalSheets);
+  props_().setProperty('DATA_MODE', 'auto');
+  return { ok: true, mode: 'auto', sheets: finalSheets.map(function (s) { return { name: s.name, rowCount: s.rowCount }; }), revision: 'sheet:' + live.revision };
 }
 
 /* ---------------------------------- analytics ---------------------------------- */

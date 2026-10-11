@@ -1,7 +1,7 @@
 # Setup guide — Payment Ops Monitor
 
 Flow: **Google Sheet (primary) → Apps Script Web App → Vercel proxy (/api/proxy) → React app**
-Backup: **Excel import → Google Drive folder `PaymentOpsMonitor`** (each import replaces the previous one).
+Backup: **Excel import → Google Sheets + versioned Google Drive chunks**. An individual filename replaces one matching tab; a full workbook replaces the operational dataset.
 
 ## 1. Prepare the Google Sheet
 1. Upload `MAIN_AN_1.xlsx` to Google Drive → open with Google Sheets → File → Save as Google Sheets.
@@ -13,9 +13,10 @@ Backup: **Excel import → Google Drive folder `PaymentOpsMonitor`** (each impor
 1. In the Sheet: Extensions → Apps Script. Delete the default code, paste `apps-script/Code.gs`, save.
 2. Run `setupToken` once (Run button) → approve permissions → View → Logs → copy the `API_TOKEN` value.
 3. Run `authorize` once (grants Drive access; creates the Drive folder).
-4. Deploy → New deployment → type **Web app** → Execute as **Me** → Who has access **Anyone** → Deploy. Copy the Web app URL (ends in `/exec`).
-5. Test in a browser: `<URL>?action=ping&token=<API_TOKEN>` should return `{"ok":true,...}`.
-6. After editing the code later: Deploy → Manage deployments → edit → New version.
+4. Run `setupBackupTrigger` once from the editor to install an hourly Drive backup.
+5. Deploy → New deployment → type **Web app** → Execute as **Me** → Who has access **Anyone** → Deploy. Copy the Web app URL (ends in `/exec`).
+6. Test in a browser: `<URL>?action=ping&token=<API_TOKEN>` should return `{"ok":true,...}`.
+7. After editing the code later: Deploy → Manage deployments → edit → New version. This is required whenever `apps-script/Code.gs` changes.
 
 If the script is not bound to the Sheet, add a Script Property `SHEET_ID` (Project Settings → Script Properties).
 
@@ -27,8 +28,10 @@ If the script is not bound to the Sheet, add a Script Property `SHEET_ID` (Proje
 
 ## 4. Daily use
 - The app reads the live Google Sheet. If it fails or is empty, it falls back to the last Drive copy (refreshed from the Sheet at most hourly) and shows a banner.
-- Sheet problem? Admin → Data Sources → **Choose Excel file** → the import replaces the Drive copy and the app serves it. Click "Switch back to the live Google Sheet" when fixed.
-- End of day: Admin → Data Sources → End-of-day record (date, total deposit, total withdrawal). Same date again overwrites. It feeds the Executive Dashboard time-series chart.
+- Individual sheet import: name the file with one of `agent`, `personal`, `vip`, or `withdrawal`, for example `monitoring_vip_20261008_121023.xlsx`. The app identifies `BDT-SSG-VIP` and replaces only that tab in Google Sheets and its Drive backup; other tabs and Analytics history remain intact.
+- Full workbook import: use the canonical tab names listed above. If the filename does not identify one individual tab, the recognized operational tabs in the workbook replace the operational dataset.
+- The app checks for updated data every 15 minutes and when a browser tab becomes visible. It skips row downloads when the monitored data revision has not changed, and re-downloads only tabs whose revision changed.
+- Daily analytics: Admin → Data Sources → Daily totals. Records are keyed by date + currency + gateway; saving the same combination updates it. Operational imports do not erase this history.
 - Thresholds: Admin → System Settings (per agent type).
 
 ## Local development

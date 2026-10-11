@@ -35,6 +35,7 @@ const readLocalSettings = (): Settings | null => { try { const v = localStorage.
 export function DataProvider({ children }: { children: ReactNode }) {
   const [dataset, setDataset] = useState<Dataset | null>(null)
   const datasetRef = useRef<Dataset | null>(null)
+  const refreshInFlight = useRef(false)
   useEffect(() => { datasetRef.current = dataset }, [dataset])
   const [settings, setSettings] = useState<Settings>(() => readLocalSettings() ?? DEFAULT_SETTINGS)
   const [loading, setLoading] = useState(true)
@@ -45,6 +46,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const [needsPasscode, setNeedsPasscode] = useState(false)
 
   const refresh = useCallback(async () => {
+    if (refreshInFlight.current) return
+    refreshInFlight.current = true
     // Keep the current/cached dashboard visible during refreshes. Only show the
     // blocking loading state when there is no usable dataset yet.
     setLoading(current => datasetRef.current === null ? true : current)
@@ -52,9 +55,10 @@ export function DataProvider({ children }: { children: ReactNode }) {
     setError(null)
     setNeedsPasscode(false)
     try {
-      const ds = await api.fetchDataset(setProgress)
+      const ds = await api.fetchDataset(setProgress, datasetRef.current)
       datasetRef.current = ds
       setDataset(ds)
+      await api.cacheDataset(ds)
       setBackendOk(true)
       if (ds.settings?.thresholds) setSettings(mergeSettings(ds.settings))
     } catch (e: any) {
@@ -79,6 +83,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       setLoading(false)
       setRefreshing(false)
       setProgress('')
+      refreshInFlight.current = false
     }
   }, [])
 
@@ -100,6 +105,19 @@ export function DataProvider({ children }: { children: ReactNode }) {
     return () => { cancelled = true }
   }, [refresh])
 
+  // Keep the dashboard synchronized every 15 minutes. Revision checks avoid downloading
+  // all rows when the source has not changed since the last successful refresh.
+  useEffect(() => {
+    const timer = window.setInterval(() => { void refresh() }, 15 * 60 * 1000)
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void refresh()
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      window.clearInterval(timer)
+      document.removeEventListener('visibilitychange', onVisible)
+    }
+  }, [refresh])
 
   const rows = useMemo(() => (dataset ? normalize(dataset, settings) : []), [dataset, settings])
   const analytics = dataset?.analytics ?? []
@@ -109,21 +127,38 @@ export function DataProvider({ children }: { children: ReactNode }) {
     try {
       setProgress('Reading Excel file…')
       const parsed = await parseExcel(file)
-      // Keep manually-recorded daily history unless the file brings its own Analytics rows
-      const next: Dataset = { ...parsed, analytics: parsed.analytics.length ? parsed.analytics : dataset?.analytics ?? [] }
+      // A named single-sheet import replaces only its matching tab in the local view;
+      // a full workbook import replaces the complete operational dataset. Daily analytics
+      // are always preserved independently of operational imports.
+      const mergedSheets = parsed.importTargetSheet && dataset
+        ? [...dataset.sheets.filter(s => s.name !== parsed.importTargetSheet), ...parsed.sheets]
+        : parsed.sheets
+      const next: Dataset = {
+        ...parsed,
+        source: 'excel',
+        sheets: mergedSheets,
+        analytics: dataset?.analytics ?? [],
+        revision: undefined,
+      }
       datasetRef.current = next
       setDataset(next)
       await api.cacheDataset(next)
-      let message = 'Imported into the app (saved in this browser only — backend not reachable).'
+      let message = 'Imported into this browser only; the server update did not complete.'
       let uploaded = false
       try {
-        await api.uploadImport(next, setProgress)
-        if (parsed.analytics.length) await api.saveAnalytics(parsed.analytics)
+        const result = await api.uploadImport(parsed, setProgress)
         uploaded = true; setBackendOk(true)
-        message = 'Imported and saved to Google Drive. The previous import was replaced.'
-        datasetRef.current = { ...next, mode: 'drive' }
-        setDataset({ ...next, mode: 'drive' })
-      } catch (e: any) { message = `Imported locally, but the Drive upload failed: ${e.message}` }
+        const saved: Dataset = { ...next, source: 'sheet', mode: 'auto', revision: dataset ? result.revision : undefined, updatedAt: new Date().toISOString() }
+        datasetRef.current = saved
+        setDataset(saved)
+        await api.cacheDataset(saved)
+        message = parsed.importTargetSheet
+          ? `Updated ${parsed.importTargetSheet} in Google Sheets and replaced its Drive backup. Other operational tabs and daily analytics were preserved.`
+          : 'Replaced the operational dataset in Google Sheets and Drive. Daily analytics were preserved.'
+      } catch (e: any) {
+        setBackendOk(false)
+        message = `The local preview was updated, but Google Sheets / Drive replacement failed: ${e.message}`
+      }
       return { uploaded, message }
     } finally { setLoading(false); setProgress('') }
   }, [dataset])

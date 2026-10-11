@@ -54,7 +54,7 @@ export interface AgentRow {
 }
 
 /** Raw dataset exactly as stored in Drive / returned by Apps Script / read from Excel */
-export interface RawSheet { name: string; header: string[]; rows: unknown[][] }
+export interface RawSheet { name: string; header: string[]; rows: unknown[][]; revision?: string }
 export interface AnalyticsEntry { date: string; currency: string; gateway: string; deposit: number; withdrawal: number; note?: string }
 
 export type DataSource = 'sheet' | 'drive' | 'excel' | 'cache'
@@ -67,6 +67,10 @@ export interface Dataset {
   sheets: RawSheet[]
   analytics: AnalyticsEntry[]
   settings?: Partial<Settings>
+  /** Revision fingerprint supplied by Apps Script to skip unchanged full downloads. */
+  revision?: string
+  /** Set when a filename identifies one operational tab (e.g. monitoring_vip_20261008_121023). */
+  importTargetSheet?: string
 }
 
 export interface Threshold { low: number; high: number; discrep: number }

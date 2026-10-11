@@ -3,6 +3,7 @@ import { Database, FileSpreadsheet, RefreshCw, Upload } from 'lucide-react'
 import { PageTitle } from '../components/Layout'
 import { Badge } from '../components/ui'
 import { getPasscode, setPasscode } from '../lib/api'
+import { detectImportTarget, importTargetLabel } from '../lib/excel'
 import { fmt } from '../lib/metrics'
 import { useData } from '../lib/store'
 
@@ -19,7 +20,11 @@ export default function DataSources() {
 
   const onFile = async (f?: File) => {
     if (!f) return
-    if (!confirm('Importing replaces the data currently stored in Google Drive. Continue?')) return
+    const target = detectImportTarget(f.name)
+    const prompt = target
+      ? `This filename identifies ${importTargetLabel(target)}. Only that tab's records will be replaced in Google Sheets and its Drive backup. Other tabs and daily analytics will be preserved. Continue?`
+      : 'This file was not identified as an individual tab from its filename. All recognized operational tabs in the workbook will replace the existing operational dataset. Daily analytics will be preserved. Continue?'
+    if (!confirm(prompt)) { if (fileRef.current) fileRef.current.value = ''; return }
     try { const r = await importExcel(f); setMsg({ ok: r.uploaded, text: r.message }) } catch (e: any) { setMsg({ ok: false, text: e.message }) }
     if (fileRef.current) fileRef.current.value = ''
   }
@@ -51,7 +56,7 @@ export default function DataSources() {
 
         <div className="card space-y-3 p-5">
           <div className="flex items-center gap-2 font-semibold"><FileSpreadsheet size={18} />Excel import (backup)</div>
-          <p className="text-sm text-slate-600">Use this when the Google Sheet or its connection has a problem. The file is read in your browser, then it <b>replaces</b> the copy stored in Google Drive. Tabs used: BDT-SSG-AGENT / PERSONAL / VIP / WITHDRAWAL-ONLY (and Analytics if it has rows).</p>
+          <p className="text-sm text-slate-600">Upload one sheet at a time or a full workbook. A filename such as <b>monitoring_vip_20261008_121023.xlsx</b> is recognized as <b>BDT-SSG-VIP</b>; only that tab and its Drive backup are replaced. If the filename does not identify a tab, recognized operational tabs in the workbook are imported as a full replacement. Daily analytics history is always preserved.</p>
           <input ref={fileRef} type="file" accept=".xlsx,.xlsm" className="hidden" onChange={e => onFile(e.target.files?.[0])} />
           <button className="btn-primary" disabled={loading} onClick={() => fileRef.current?.click()}><Upload size={14} />Choose Excel file…</button>
           {loading && progress && <div className="text-sm text-slate-500">{progress}</div>}
@@ -64,12 +69,12 @@ export default function DataSources() {
       </div>
 
       <div className="card space-y-3 p-5">
-        <div className="font-semibold">End-of-day record (feeds the time-series chart)</div>
-        <p className="text-sm text-slate-600">Enter the day's total deposit and withdrawal. Saving the same date/currency/gateway again overwrites that day. Stored in the Analytics tab and Drive.</p>
+        <div className="font-semibold">Daily totals (feeds the time-series chart)</div>
+        <p className="text-sm text-slate-600">Record the daily total by date, currency, and merchant/gateway. Saving the same date/currency/gateway again updates that record instead of duplicating it. Operational imports never erase this history.</p>
         <div className="flex flex-wrap items-end gap-3">
           <label className="text-xs text-slate-500">Date<input type="date" className="input mt-1 block" value={rec.date} onChange={e => setRec({ ...rec, date: e.target.value })} /></label>
-          <label className="text-xs text-slate-500">Currency<select className="input mt-1 block" value={rec.currency} onChange={e => setRec({ ...rec, currency: e.target.value })}><option>BDT</option></select></label>
-          <label className="text-xs text-slate-500">Gateway<select className="input mt-1 block" value={rec.gateway} onChange={e => setRec({ ...rec, gateway: e.target.value })}><option>SSG</option></select></label>
+          <label className="text-xs text-slate-500">Currency<select className="input mt-1 block" value={rec.currency} onChange={e => setRec({ ...rec, currency: e.target.value })}><option>BDT</option><option>PKR</option><option>INR</option></select></label>
+          <label className="text-xs text-slate-500">Gateway<select className="input mt-1 block" value={rec.gateway} onChange={e => setRec({ ...rec, gateway: e.target.value })}><option>SSG</option><option>MCG</option><option>Local Bank</option><option>Bangkok-Pay</option><option>SIMPAISA</option></select></label>
           <label className="text-xs text-slate-500">Total deposit<input type="number" className="input mt-1 block w-40" value={rec.deposit} onChange={e => setRec({ ...rec, deposit: e.target.value })} /></label>
           <label className="text-xs text-slate-500">Total withdrawal<input type="number" className="input mt-1 block w-40" value={rec.withdrawal} onChange={e => setRec({ ...rec, withdrawal: e.target.value })} /></label>
           <label className="text-xs text-slate-500">Note<input className="input mt-1 block w-56" value={rec.note} onChange={e => setRec({ ...rec, note: e.target.value })} /></label>

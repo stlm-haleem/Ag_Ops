@@ -27,8 +27,9 @@ interface Manifest {
   mode: 'auto' | 'drive'
   source: 'sheet' | 'drive'
   updatedAt: string | null
+  revision?: string
   sheetError: string | null
-  sheets: { name: string; header: string[]; rowCount: number }[]
+  sheets: { name: string; header: string[]; rowCount: number; revision?: string }[]
   analytics: AnalyticsEntry[]
   settings: Partial<Settings>
 }
@@ -37,18 +38,41 @@ const PAGE = 4000
 const MAX_PARALLEL_REQUESTS = 3
 
 /** Fetch a small number of sheet chunks concurrently to reduce sequential round-trip time. */
-export async function fetchDataset(onProgress?: (msg: string) => void): Promise<Dataset> {
+export async function fetchDataset(onProgress?: (msg: string) => void, knownDataset?: Dataset | null): Promise<Dataset> {
   const startedAt = performance.now()
-  onProgress?.('Contacting Google Apps Script…')
+  onProgress?.('Checking latest data version…')
   const m = await call<Manifest>('manifest')
-  const sheets: RawSheet[] = new Array(m.sheets.length)
-  const jobs: { sheetIndex: number; sheet: Manifest['sheets'][number]; offset: number }[] = []
+  // If the source revision is unchanged, reuse all cached rows and skip every rows request.
+  if (knownDataset && m.revision && knownDataset.revision === m.revision) {
+    onProgress?.('No data changes detected; keeping the current dataset.')
+    return { ...knownDataset, source: m.source, mode: m.mode, updatedAt: m.updatedAt, sheetError: m.sheetError,
+      analytics: m.analytics, settings: m.settings, revision: m.revision }
+  }
 
+  const sourceChanged = !!knownDataset && knownDataset.source !== 'cache' && knownDataset.source !== m.source
+  let reloadNames = new Set<string>()
+  if (!knownDataset || sourceChanged) {
+    m.sheets.forEach(s => reloadNames.add(s.name))
+  } else {
+    m.sheets.forEach(s => {
+      const old = knownDataset.sheets.find(x => x.name === s.name)
+      const sameHeader = !!old && old.header.length === s.header.length && old.header.every((v, i) => v === s.header[i])
+      if (!old || old.revision !== s.revision || old.rows.length !== s.rowCount || !sameHeader) reloadNames.add(s.name)
+    })
+    // A source-level change without a per-sheet revision signal means a change may have
+    // bypassed Apps Script's edit tracking. Fall back to a full refresh for correctness.
+    if (!reloadNames.size && m.revision !== knownDataset.revision) m.sheets.forEach(s => reloadNames.add(s.name))
+  }
+
+  const sheets: RawSheet[] = m.sheets.map(sheet => {
+    const old = knownDataset?.sheets.find(x => x.name === sheet.name)
+    if (!reloadNames.has(sheet.name) && old) return { ...old, revision: sheet.revision }
+    return { name: sheet.name, header: sheet.header, revision: sheet.revision, rows: new Array(sheet.rowCount) }
+  })
+  const jobs: { sheetIndex: number; sheet: Manifest['sheets'][number]; offset: number }[] = []
   m.sheets.forEach((sheet, sheetIndex) => {
-    for (let offset = 0; offset < sheet.rowCount; offset += PAGE) {
-      jobs.push({ sheetIndex, sheet, offset })
-    }
-    sheets[sheetIndex] = { name: sheet.name, header: sheet.header, rows: new Array(sheet.rowCount) }
+    if (!reloadNames.has(sheet.name)) return
+    for (let offset = 0; offset < sheet.rowCount; offset += PAGE) jobs.push({ sheetIndex, sheet, offset })
   })
 
   let completed = 0
@@ -58,13 +82,8 @@ export async function fetchDataset(onProgress?: (msg: string) => void): Promise<
       const jobIndex = nextJob++
       const job = jobs[jobIndex]
       const end = Math.min(job.offset + PAGE, job.sheet.rowCount)
-      onProgress?.(`Loading data (${completed.toLocaleString()} / ${jobs.length} batches) · ${job.sheet.name}`)
-      const result = await call<{ rows: unknown[][] }>('rows', {
-        sheet: job.sheet.name,
-        offset: job.offset,
-        limit: PAGE,
-      })
-      // Write into the original offset so concurrent requests cannot reorder rows.
+      onProgress?.(`Loading changed data (${completed.toLocaleString()} / ${jobs.length} batches) · ${job.sheet.name}`)
+      const result = await call<{ rows: unknown[][] }>('rows', { sheet: job.sheet.name, offset: job.offset, limit: PAGE })
       result.rows.forEach((row, index) => { sheets[job.sheetIndex].rows[job.offset + index] = row })
       completed++
       onProgress?.(`Loaded ${completed.toLocaleString()} / ${jobs.length} batches · ${job.sheet.name} (${end.toLocaleString()} / ${job.sheet.rowCount.toLocaleString()})`)
@@ -73,34 +92,63 @@ export async function fetchDataset(onProgress?: (msg: string) => void): Promise<
   await Promise.all(workers)
 
   const ds: Dataset = {
-    source: m.source,
-    mode: m.mode,
-    updatedAt: m.updatedAt,
-    sheetError: m.sheetError,
-    sheets,
-    analytics: m.analytics,
-    settings: m.settings,
+    source: m.source, mode: m.mode, updatedAt: m.updatedAt, revision: m.revision,
+    sheetError: m.sheetError, sheets, analytics: m.analytics, settings: m.settings,
   }
   await cacheDataset(ds)
   const elapsed = ((performance.now() - startedAt) / 1000).toFixed(1)
-  onProgress?.(`Data refreshed in ${elapsed}s`)
+  onProgress?.(jobs.length ? `Data refreshed in ${elapsed}s` : 'Data version updated; no operational rows needed downloading.')
   return ds
 }
 
 export async function cacheDataset(ds: Dataset) { try { await set(CACHE_KEY, ds) } catch { /* ignore */ } }
 export async function loadCached(): Promise<Dataset | null> { try { return (await get(CACHE_KEY)) ?? null } catch { return null } }
 
-/** Upload an Excel import to Drive in chunks (Vercel limits request bodies to ~4.5MB). Replaces the previous import. */
-export async function uploadImport(ds: Dataset, onProgress?: (msg: string) => void) {
-  const CHUNK = 3000
+/** Upload an Excel import in bounded JSON chunks, then replace either one detected tab or the whole operational dataset. */
+export async function uploadImport(ds: Dataset, onProgress?: (msg: string) => void): Promise<{ revision?: string }> {
+  const importId = (typeof crypto !== 'undefined' && 'randomUUID' in crypto)
+    ? crypto.randomUUID().replace(/-/g, '')
+    : `${Date.now()}${Math.random().toString(16).slice(2)}`
+  const MAX_CHUNK_CHARS = 1_200_000 // safely below the standard Vercel request-body limit for typical spreadsheet rows
+  const sheetsMeta: { name: string; rowCount: number; chunkCount: number }[] = []
+
   for (const s of ds.sheets) {
-    for (let i = 0, idx = 0; i < Math.max(s.rows.length, 1); i += CHUNK, idx++) {
-      onProgress?.(`Uploading ${s.name} (${Math.min(i + CHUNK, s.rows.length).toLocaleString()} / ${s.rows.length.toLocaleString()})`)
-      await call('importChunk', {}, { sheet: s.name, index: idx, header: idx === 0 ? s.header : undefined, rows: s.rows.slice(i, i + CHUNK) })
+    let chunk: unknown[][] = []
+    let chunkChars = 2
+    let index = 0
+    let startRow = 0
+    const uploadChunk = async (rows: unknown[][], chunkIndex: number) => {
+      onProgress?.(`Uploading ${s.name} · batch ${chunkIndex + 1}`)
+      await call('importChunk', {}, { importId, sheet: s.name, index: chunkIndex, startRow,
+        header: chunkIndex === 0 ? s.header : undefined, rows })
+      startRow += rows.length
     }
+
+    for (const row of s.rows) {
+      const rowChars = JSON.stringify(row).length + 1
+      if (chunk.length && chunkChars + rowChars > MAX_CHUNK_CHARS) {
+        await uploadChunk(chunk, index++)
+        chunk = []
+        chunkChars = 2
+      }
+      chunk.push(row)
+      chunkChars += rowChars
+    }
+    // Always send one chunk so an empty sheet can intentionally replace existing records.
+    if (chunk.length || index === 0) await uploadChunk(chunk, index++)
+    sheetsMeta.push({ name: s.name, rowCount: s.rows.length, chunkCount: index })
   }
-  onProgress?.('Finalising…')
-  await call('importCommit', {}, { sheets: ds.sheets.map(s => ({ name: s.name, rowCount: s.rows.length })), fileName: ds.fileName })
+
+  onProgress?.('Validating import and replacing the selected Google Sheet / Drive backup…')
+  const result = await call<{ revision?: string }>('importCommit', {}, {
+    importId,
+    sheets: sheetsMeta,
+    fileName: ds.fileName || '',
+    replaceMode: ds.importTargetSheet ? 'selected' : 'all',
+    targetSheet: ds.importTargetSheet || '',
+  })
+  onProgress?.('Import completed.')
+  return result
 }
 
 export const setMode = (mode: 'auto' | 'drive') => call('setMode', { mode })
