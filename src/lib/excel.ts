@@ -7,6 +7,7 @@ const normalizeToken = (value: string) => value.toLowerCase().replace(/[^a-z0-9]
 export function detectImportTarget(fileName: string): string | null {
   const token = normalizeToken(fileName.replace(/\.[^.]+$/, ''))
   // Check the more specific group first so "withdrawal_only" cannot be mistaken for a general agent file.
+  if (/(^|_)(permanent_stop|permanentstop|permanent)(_|$)/.test(token)) return 'BDT-SSG-PERMANENT-STOP'
   if (/(^|_)(withdrawal_only|withdraw_only|withdrawal|withdraw)(_|$)/.test(token)) return 'BDT-SSG-WITHDRAWAL-ONLY'
   if (/(^|_)(personal|personals)(_|$)/.test(token)) return 'BDT-SSG-PERSONAL'
   if (/(^|_)vip(_|$)/.test(token)) return 'BDT-SSG-VIP'
@@ -19,9 +20,11 @@ export function detectImportTarget(fileName: string): string | null {
 }
 
 export function importTargetLabel(sheetName: string): string {
-  return SHEET_GROUP[sheetName]?.group === 'WITHDRAWAL' ? 'BDT · SSG · Withdrawal only'
-    : SHEET_GROUP[sheetName] ? `BDT · SSG · ${SHEET_GROUP[sheetName].group === 'AGENT' ? 'Agents' : SHEET_GROUP[sheetName].group === 'PERSONAL' ? 'Personal' : 'VIP'}`
-    : sheetName
+  const group = SHEET_GROUP[sheetName]?.group
+  if (group === 'WITHDRAWAL') return 'BDT · SSG · Withdrawal only'
+  if (group === 'PERMANENT_STOP') return 'BDT · SSG · Permanent Stop'
+  if (group) return `BDT · SSG · ${group === 'AGENT' ? 'Agents' : group === 'PERSONAL' ? 'Personal' : 'VIP'}`
+  return sheetName
 }
 
 export async function parseExcel(file: File): Promise<Dataset> {

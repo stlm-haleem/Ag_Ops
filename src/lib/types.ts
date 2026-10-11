@@ -1,10 +1,11 @@
-export type Group = 'AGENT' | 'PERSONAL' | 'VIP' | 'WITHDRAWAL'
-export const GROUPS: Group[] = ['AGENT', 'PERSONAL', 'VIP', 'WITHDRAWAL']
+export type Group = 'AGENT' | 'PERSONAL' | 'VIP' | 'WITHDRAWAL' | 'PERMANENT_STOP'
+export const GROUPS: Group[] = ['AGENT', 'PERSONAL', 'VIP', 'WITHDRAWAL', 'PERMANENT_STOP']
 export const GROUP_LABEL: Record<Group, string> = {
   AGENT: 'Agents',
   PERSONAL: 'Personal',
   VIP: 'VIP',
   WITHDRAWAL: 'Withdrawal only',
+  PERMANENT_STOP: 'Permanent Stop',
 }
 
 /** Sheet tab name -> group. Add new tabs here when more gateways go live. */
@@ -13,6 +14,7 @@ export const SHEET_GROUP: Record<string, { group: Group; currency: string; gatew
   'BDT-SSG-PERSONAL': { group: 'PERSONAL', currency: 'BDT', gateway: 'SSG' },
   'BDT-SSG-VIP': { group: 'VIP', currency: 'BDT', gateway: 'SSG' },
   'BDT-SSG-WITHDRAWAL-ONLY': { group: 'WITHDRAWAL', currency: 'BDT', gateway: 'SSG' },
+  'BDT-SSG-PERMANENT-STOP': { group: 'PERMANENT_STOP', currency: 'BDT', gateway: 'SSG' },
 }
 export const DATA_SHEETS = Object.keys(SHEET_GROUP)
 
@@ -82,5 +84,7 @@ export const DEFAULT_SETTINGS: Settings = {
     PERSONAL: { low: 1000, high: 30000, discrep: 1000 },
     VIP: { low: 1000, high: 20000, discrep: 10000 },
     WITHDRAWAL: { low: 5000, high: 100000, discrep: 10000 },
+    // Initial defaults match Withdrawal only; adjust in Admin → Settings to your operating thresholds.
+    PERMANENT_STOP: { low: 5000, high: 100000, discrep: 10000 },
   },
 }

@@ -13,10 +13,10 @@ This update keeps React/Vite, Vercel, Google Sheets, Google Apps Script, and Goo
 - Data requests remain `no-store`; sensitive operational data is not put in a public CDN cache.
 
 ### Individual Excel imports
-- A filename containing `agent`, `personal`, `vip`, or `withdrawal` identifies the target BDT-SSG tab.
-- Example: `monitoring_vip_20261008_121023.xlsx` targets `BDT-SSG-VIP`.
+- A filename containing `agent`, `personal`, `vip`, `withdrawal`, or `permanent-stop` identifies the target BDT-SSG tab.
+- Examples: `monitoring_vip_20261008_121023.xlsx` targets `BDT-SSG-VIP`; `monitoring_permanent-stop_20261011_172407.xlsx` targets `BDT-SSG-PERMANENT-STOP`.
 - For a recognized individual filename, only that tab is replaced in Google Sheets and only that tab's Drive backup version is replaced. Other operational tabs are preserved.
-- A workbook without a recognized individual filename is treated as a full operational workbook. It must contain the canonical tab names (`BDT-SSG-AGENT`, `BDT-SSG-PERSONAL`, `BDT-SSG-VIP`, `BDT-SSG-WITHDRAWAL-ONLY`). Tabs omitted from a full workbook are cleared/removed from the active backup metadata.
+- A workbook without a recognized individual filename is treated as a full operational workbook. It must contain the canonical tab names (`BDT-SSG-AGENT`, `BDT-SSG-PERSONAL`, `BDT-SSG-VIP`, `BDT-SSG-WITHDRAWAL-ONLY`, `BDT-SSG-PERMANENT-STOP`). Tabs omitted from a full workbook are cleared/removed from the active backup metadata.
 - The import is split into bounded chunks. Apps Script validates all chunks before replacing the target tab, writes the records to Google Sheets, and stores a versioned chunked Drive backup.
 - Before replacing an existing Google Sheet tab, Apps Script creates a temporary copy so it can restore the old values if the write fails.
 - Successful imports switch the app back to live Google Sheets mode because the import updates both Google Sheets and Drive.
