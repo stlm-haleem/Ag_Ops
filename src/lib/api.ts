@@ -34,22 +34,56 @@ interface Manifest {
 }
 
 const PAGE = 4000
+const MAX_PARALLEL_REQUESTS = 3
 
+/** Fetch a small number of sheet chunks concurrently to reduce sequential round-trip time. */
 export async function fetchDataset(onProgress?: (msg: string) => void): Promise<Dataset> {
+  const startedAt = performance.now()
   onProgress?.('Contacting Google Apps Script…')
   const m = await call<Manifest>('manifest')
-  const sheets: RawSheet[] = []
-  for (const s of m.sheets) {
-    const rows: unknown[][] = []
-    for (let off = 0; off < s.rowCount; off += PAGE) {
-      onProgress?.(`Loading ${s.name} (${Math.min(off + PAGE, s.rowCount).toLocaleString()} / ${s.rowCount.toLocaleString()})`)
-      const r = await call<{ rows: unknown[][] }>('rows', { sheet: s.name, offset: off, limit: PAGE })
-      rows.push(...r.rows)
+  const sheets: RawSheet[] = new Array(m.sheets.length)
+  const jobs: { sheetIndex: number; sheet: Manifest['sheets'][number]; offset: number }[] = []
+
+  m.sheets.forEach((sheet, sheetIndex) => {
+    for (let offset = 0; offset < sheet.rowCount; offset += PAGE) {
+      jobs.push({ sheetIndex, sheet, offset })
     }
-    sheets.push({ name: s.name, header: s.header, rows })
+    sheets[sheetIndex] = { name: sheet.name, header: sheet.header, rows: new Array(sheet.rowCount) }
+  })
+
+  let completed = 0
+  let nextJob = 0
+  const workers = Array.from({ length: Math.min(MAX_PARALLEL_REQUESTS, jobs.length) }, async () => {
+    while (nextJob < jobs.length) {
+      const jobIndex = nextJob++
+      const job = jobs[jobIndex]
+      const end = Math.min(job.offset + PAGE, job.sheet.rowCount)
+      onProgress?.(`Loading data (${completed.toLocaleString()} / ${jobs.length} batches) · ${job.sheet.name}`)
+      const result = await call<{ rows: unknown[][] }>('rows', {
+        sheet: job.sheet.name,
+        offset: job.offset,
+        limit: PAGE,
+      })
+      // Write into the original offset so concurrent requests cannot reorder rows.
+      result.rows.forEach((row, index) => { sheets[job.sheetIndex].rows[job.offset + index] = row })
+      completed++
+      onProgress?.(`Loaded ${completed.toLocaleString()} / ${jobs.length} batches · ${job.sheet.name} (${end.toLocaleString()} / ${job.sheet.rowCount.toLocaleString()})`)
+    }
+  })
+  await Promise.all(workers)
+
+  const ds: Dataset = {
+    source: m.source,
+    mode: m.mode,
+    updatedAt: m.updatedAt,
+    sheetError: m.sheetError,
+    sheets,
+    analytics: m.analytics,
+    settings: m.settings,
   }
-  const ds: Dataset = { source: m.source, mode: m.mode, updatedAt: m.updatedAt, sheetError: m.sheetError, sheets, analytics: m.analytics, settings: m.settings }
   await cacheDataset(ds)
+  const elapsed = ((performance.now() - startedAt) / 1000).toFixed(1)
+  onProgress?.(`Data refreshed in ${elapsed}s`)
   return ds
 }
 

@@ -1,4 +1,4 @@
-import { createContext, ReactNode, useCallback, useContext, useEffect, useMemo, useState } from 'react'
+import { createContext, ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import * as api from './api'
 import { parseExcel } from './excel'
 import { normalize } from './normalize'
@@ -10,6 +10,7 @@ interface Ctx {
   analytics: AnalyticsEntry[]
   settings: Settings
   loading: boolean
+  refreshing: boolean
   progress: string
   error: string | null
   backendOk: boolean
@@ -33,29 +34,72 @@ const readLocalSettings = (): Settings | null => { try { const v = localStorage.
 
 export function DataProvider({ children }: { children: ReactNode }) {
   const [dataset, setDataset] = useState<Dataset | null>(null)
+  const datasetRef = useRef<Dataset | null>(null)
+  useEffect(() => { datasetRef.current = dataset }, [dataset])
   const [settings, setSettings] = useState<Settings>(() => readLocalSettings() ?? DEFAULT_SETTINGS)
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
   const [progress, setProgress] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [backendOk, setBackendOk] = useState(false)
   const [needsPasscode, setNeedsPasscode] = useState(false)
 
   const refresh = useCallback(async () => {
-    setLoading(true); setError(null); setNeedsPasscode(false)
+    // Keep the current/cached dashboard visible during refreshes. Only show the
+    // blocking loading state when there is no usable dataset yet.
+    setLoading(current => datasetRef.current === null ? true : current)
+    setRefreshing(true)
+    setError(null)
+    setNeedsPasscode(false)
     try {
       const ds = await api.fetchDataset(setProgress)
-      setDataset(ds); setBackendOk(true)
+      datasetRef.current = ds
+      setDataset(ds)
+      setBackendOk(true)
       if (ds.settings?.thresholds) setSettings(mergeSettings(ds.settings))
     } catch (e: any) {
       setBackendOk(false)
-      if (e?.status === 401) { setNeedsPasscode(true); return }
-      const cached = await api.loadCached()
-      if (cached) { setDataset({ ...cached, source: cached.source === 'excel' ? 'excel' : 'cache' }); setError(`Backend unavailable (${e.message}). Showing last data saved in this browser.`) }
-      else setError(`Backend unavailable (${e.message}). Import your Excel file in Admin → Data Sources to get started.`)
-    } finally { setLoading(false); setProgress('') }
+      if (e?.status === 401) {
+        setNeedsPasscode(true)
+        return
+      }
+      // Don't replace a usable current dataset with an older cache if refresh fails.
+      if (datasetRef.current) {
+        setError(`Refresh failed (${e.message}). Showing the data already loaded in this session.`)
+      } else {
+        const cached = await api.loadCached()
+        if (cached) {
+          setDataset({ ...cached, source: cached.source === 'excel' ? 'excel' : 'cache' })
+          setError(`Backend unavailable (${e.message}). Showing saved browser data; it may be outdated.`)
+        } else {
+          setError(`Backend unavailable (${e.message}). Import your Excel file in Admin → Data Sources to get started.`)
+        }
+      }
+    } finally {
+      setLoading(false)
+      setRefreshing(false)
+      setProgress('')
+    }
   }, [])
 
-  useEffect(() => { refresh() }, [refresh])
+  // On startup, hydrate from IndexedDB first so returning users can see their
+  // previous dashboard while the live Google Sheets refresh runs in the background.
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      const cached = await api.loadCached()
+      if (cancelled) return
+      if (cached) {
+        const localDataset = { ...cached, source: cached.source === 'excel' ? 'excel' as const : 'cache' as const }
+        datasetRef.current = localDataset
+        setDataset(localDataset)
+        setLoading(false)
+      }
+      await refresh()
+    })()
+    return () => { cancelled = true }
+  }, [refresh])
+
 
   const rows = useMemo(() => (dataset ? normalize(dataset, settings) : []), [dataset, settings])
   const analytics = dataset?.analytics ?? []
@@ -67,6 +111,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       const parsed = await parseExcel(file)
       // Keep manually-recorded daily history unless the file brings its own Analytics rows
       const next: Dataset = { ...parsed, analytics: parsed.analytics.length ? parsed.analytics : dataset?.analytics ?? [] }
+      datasetRef.current = next
       setDataset(next)
       await api.cacheDataset(next)
       let message = 'Imported into the app (saved in this browser only — backend not reachable).'
@@ -76,6 +121,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
         if (parsed.analytics.length) await api.saveAnalytics(parsed.analytics)
         uploaded = true; setBackendOk(true)
         message = 'Imported and saved to Google Drive. The previous import was replaced.'
+        datasetRef.current = { ...next, mode: 'drive' }
         setDataset({ ...next, mode: 'drive' })
       } catch (e: any) { message = `Imported locally, but the Drive upload failed: ${e.message}` }
       return { uploaded, message }
@@ -106,5 +152,5 @@ export function DataProvider({ children }: { children: ReactNode }) {
     })
   }, [])
 
-  return <C.Provider value={{ dataset, rows, analytics, settings, loading, progress, error, backendOk, needsPasscode, submitPasscode, refresh, importExcel, switchToSheet, updateSettings, addAnalytics }}>{children}</C.Provider>
+  return <C.Provider value={{ dataset, rows, analytics, settings, loading, refreshing, progress, error, backendOk, needsPasscode, submitPasscode, refresh, importExcel, switchToSheet, updateSettings, addAnalytics }}>{children}</C.Provider>
 }

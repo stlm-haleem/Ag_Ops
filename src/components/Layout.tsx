@@ -23,7 +23,7 @@ function Group({ icon, label, open: initial, children, match }: { icon: ReactNod
 }
 
 export default function Layout({ children }: { children: ReactNode }) {
-  const { loading, progress, error, dataset, needsPasscode, submitPasscode } = useData()
+  const { loading, refreshing, progress, error, dataset, needsPasscode, submitPasscode } = useData()
   const [pw, setPw] = useState('')
   if (needsPasscode) return (
     <div className="flex min-h-screen items-center justify-center bg-slate-900 p-4">
@@ -74,9 +74,13 @@ export default function Layout({ children }: { children: ReactNode }) {
             <NavLink to="/admin/settings" className={sub}>System Settings</NavLink>
           </Group>
         </nav>
-        <div className="mt-auto px-3 pt-4 text-xs text-slate-500">
-          {loading ? <span className="flex items-center gap-1"><Loader2 size={12} className="animate-spin" />{progress || 'Loading…'}</span>
-            : dataset ? <>Data: {dataset.source === 'sheet' ? 'Google Sheet (live)' : dataset.source === 'drive' ? 'Google Drive import' : dataset.source === 'excel' ? 'Excel import' : 'Browser cache'}</> : 'No data loaded'}
+        <div className="mt-auto space-y-1 px-3 pt-4 text-xs text-slate-500">
+          {refreshing && <span className="flex items-center gap-1 text-sky-300"><Loader2 size={12} className="animate-spin" />{progress || (dataset ? 'Refreshing data in background…' : 'Loading…')}</span>}
+          {dataset ? <>
+            <div>Data: {dataset.source === 'sheet' ? 'Google Sheet (live)' : dataset.source === 'drive' ? 'Google Drive import' : dataset.source === 'excel' ? 'Excel import' : 'Browser cache'}</div>
+            {dataset.updatedAt && <div>Data timestamp: {new Date(dataset.updatedAt).toLocaleString()}</div>}
+            {dataset.source === 'cache' && <div className="text-amber-300">Saved copy · refresh in progress</div>}
+          </> : !loading ? 'No data loaded' : null}
         </div>
       </aside>
       <main className="min-w-0 flex-1">
