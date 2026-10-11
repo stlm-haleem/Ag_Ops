@@ -1,6 +1,6 @@
 import { ReactNode, useState } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
-import { BarChart3, ChevronDown, ChevronRight, Database, FileText, LayoutDashboard, Settings, Users, Globe2, Loader2, AlertTriangle } from 'lucide-react'
+import { BarChart3, ChevronDown, ChevronRight, Database, FileText, LayoutDashboard, Settings, Users, Globe2, Loader2, AlertTriangle, Menu, X } from 'lucide-react'
 import { useData } from '../lib/store'
 
 const link = ({ isActive }: { isActive: boolean }) =>
@@ -25,6 +25,7 @@ function Group({ icon, label, open: initial, children, match }: { icon: ReactNod
 export default function Layout({ children }: { children: ReactNode }) {
   const { loading, refreshing, progress, error, dataset, needsPasscode, submitPasscode } = useData()
   const [pw, setPw] = useState('')
+  const [mobileOpen, setMobileOpen] = useState(false)
   if (needsPasscode) return (
     <div className="flex min-h-screen items-center justify-center bg-slate-900 p-4">
       <form className="card w-full max-w-sm space-y-4 p-6" onSubmit={e => { e.preventDefault(); submitPasscode(pw) }}>
@@ -84,16 +85,54 @@ export default function Layout({ children }: { children: ReactNode }) {
         </div>
       </aside>
       <main className="min-w-0 flex-1">
-        {/* mobile nav */}
-        <div className="flex gap-2 overflow-x-auto bg-slate-900 p-2 md:hidden">
-          {[['/', 'Dashboard'], ['/currency/bdt/ssg', 'BDT-SSG'], ['/admin/data-sources', 'Data'], ['/admin/settings', 'Settings']].map(([to, l]) => (
-            <NavLink key={to} to={to} end className={({ isActive }) => `whitespace-nowrap rounded-md px-3 py-1.5 text-sm ${isActive ? 'bg-brand-600 text-white' : 'text-slate-300'}`}>{l}</NavLink>
-          ))}
-        </div>
+        {/* Mobile header and full navigation drawer */}
+        <header className="mobile-header md:hidden">
+          <button type="button" className="mobile-menu-button" aria-label={mobileOpen ? 'Close navigation' : 'Open navigation'} aria-expanded={mobileOpen} onClick={() => setMobileOpen(v => !v)}>
+            {mobileOpen ? <X size={21} /> : <Menu size={21} />}
+          </button>
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-sm font-semibold text-white">Payment Ops Monitor</div>
+            <div className="truncate text-[11px] text-slate-400">{refreshing ? (progress || 'Updating data…') : dataset ? `Updated ${new Date(dataset.updatedAt || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : 'Monitoring dashboard'}</div>
+          </div>
+          <NavLink to="/" end onClick={() => setMobileOpen(false)} className={({ isActive }) => `rounded-lg px-3 py-2 text-xs font-medium ${isActive ? 'bg-brand-600 text-white' : 'bg-white/10 text-slate-200'}`}>Dashboard</NavLink>
+        </header>
+        {mobileOpen && <>
+          <button className="mobile-nav-backdrop md:hidden" aria-label="Close navigation" onClick={() => setMobileOpen(false)} />
+          <nav className="mobile-nav-drawer md:hidden" aria-label="Mobile navigation">
+            <div className="mb-3 flex items-center justify-between px-2">
+              <span className="text-sm font-semibold text-white">Navigation</span>
+              <button className="rounded-lg p-2 text-slate-300 hover:bg-white/10" onClick={() => setMobileOpen(false)} aria-label="Close navigation"><X size={19} /></button>
+            </div>
+            <NavLink to="/" end onClick={() => setMobileOpen(false)} className={link}><LayoutDashboard size={16} />Executive Dashboard</NavLink>
+            <div className="mobile-nav-section">Operations</div>
+            <NavLink to="/operations/all" onClick={() => setMobileOpen(false)} className={link}><Users size={16} />All Agents</NavLink>
+            <NavLink to="/operations/low" onClick={() => setMobileOpen(false)} className={link}>Low Balance</NavLink>
+            <NavLink to="/operations/high" onClick={() => setMobileOpen(false)} className={link}>High Balance</NavLink>
+            <NavLink to="/operations/alerts" onClick={() => setMobileOpen(false)} className={link}>Alerts</NavLink>
+            <div className="mobile-nav-section">Currencies</div>
+            <NavLink to="/currency/bdt" end onClick={() => setMobileOpen(false)} className={link}><Globe2 size={16} />BDT Overview</NavLink>
+            <NavLink to="/currency/bdt/ssg" onClick={() => setMobileOpen(false)} className={link}>BDT · SSG</NavLink>
+            <NavLink to="/currency/bdt/mcg" onClick={() => setMobileOpen(false)} className={link}>BDT · MCG</NavLink>
+            <NavLink to="/currency/bdt/local-bank" onClick={() => setMobileOpen(false)} className={link}>BDT · Local Bank</NavLink>
+            <NavLink to="/currency/pkr" end onClick={() => setMobileOpen(false)} className={link}><Globe2 size={16} />PKR Overview</NavLink>
+            <NavLink to="/currency/pkr/ssg" onClick={() => setMobileOpen(false)} className={link}>PKR · SSG</NavLink>
+            <NavLink to="/currency/pkr/bangkok-pay" onClick={() => setMobileOpen(false)} className={link}>PKR · Bangkok-Pay</NavLink>
+            <NavLink to="/currency/pkr/local-bank" onClick={() => setMobileOpen(false)} className={link}>PKR · Local Bank</NavLink>
+            <NavLink to="/currency/inr" onClick={() => setMobileOpen(false)} className={link}><Globe2 size={16} />INR</NavLink>
+            <div className="mobile-nav-section">Reports & Admin</div>
+            <NavLink to="/reports" onClick={() => setMobileOpen(false)} className={link}><FileText size={16} />Reports</NavLink>
+            <NavLink to="/admin/data-sources" onClick={() => setMobileOpen(false)} className={link}><Database size={16} />Data Sources / Import</NavLink>
+            <NavLink to="/admin/settings" onClick={() => setMobileOpen(false)} className={link}><Settings size={16} />System Settings</NavLink>
+            <div className="mt-4 border-t border-white/10 px-3 pt-3 text-xs leading-5 text-slate-400">
+              {dataset ? <><div>Source: {dataset.source === 'sheet' ? 'Google Sheets' : dataset.source === 'drive' ? 'Google Drive' : dataset.source === 'excel' ? 'Excel import' : 'Browser cache'}</div>{dataset.updatedAt && <div>Updated: {new Date(dataset.updatedAt).toLocaleString()}</div>}</> : loading ? 'Loading data…' : 'No data loaded'}
+              {error && <div className="mt-1 text-amber-300">{error}</div>}
+            </div>
+          </nav>
+        </>}
         {error && (
           <div className="flex items-start gap-2 border-b border-amber-200 bg-amber-50 px-6 py-2 text-sm text-amber-800"><AlertTriangle size={16} className="mt-0.5 shrink-0" />{error}</div>
         )}
-        <div className="mx-auto max-w-[1500px] space-y-6 p-4 md:p-6">{children}</div>
+        <div className="page-content mx-auto max-w-[1500px] space-y-6 p-4 md:p-6">{children}</div>
       </main>
     </div>
   )
