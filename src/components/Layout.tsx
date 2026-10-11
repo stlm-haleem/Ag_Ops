@@ -23,7 +23,19 @@ function Group({ icon, label, open: initial, children, match }: { icon: ReactNod
 }
 
 export default function Layout({ children }: { children: ReactNode }) {
-  const { loading, progress, error, dataset } = useData()
+  const { loading, progress, error, dataset, needsPasscode, submitPasscode } = useData()
+  const [pw, setPw] = useState('')
+  if (needsPasscode) return (
+    <div className="flex min-h-screen items-center justify-center bg-slate-900 p-4">
+      <form className="card w-full max-w-sm space-y-4 p-6" onSubmit={e => { e.preventDefault(); submitPasscode(pw) }}>
+        <div className="text-lg font-semibold">Payment Ops Monitor</div>
+        <div className="text-sm text-slate-500">Enter the app passcode to continue.</div>
+        <input autoFocus type="password" className="input w-full" value={pw} onChange={e => setPw(e.target.value)} placeholder="Passcode" />
+        {pw && !loading && <div className="hidden" />}
+        <button className="btn-primary w-full justify-center" disabled={loading || !pw}>{loading ? 'Checking…' : 'Unlock'}</button>
+      </form>
+    </div>
+  )
   return (
     <div className="flex min-h-screen">
       <aside className="sticky top-0 hidden h-screen w-64 shrink-0 flex-col overflow-y-auto bg-slate-900 p-3 md:flex">

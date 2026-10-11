@@ -1,6 +1,7 @@
 import { get, set } from 'idb-keyval'
 import { AnalyticsEntry, Dataset, RawSheet, Settings } from './types'
 
+export class ApiError extends Error { status: number; constructor(m: string, status: number) { super(m); this.status = status } }
 const BASE = '/api/proxy'
 const CACHE_KEY = 'dataset-cache-v1'
 const PASS_KEY = 'app-passcode'
@@ -17,8 +18,8 @@ async function call<T>(action: string, params: Record<string, string | number> =
   })
   const text = await res.text()
   let json: any
-  try { json = JSON.parse(text) } catch { throw new Error(res.ok ? 'Backend returned a non-JSON response' : `Backend error ${res.status}`) }
-  if (!res.ok || json?.error) throw new Error(json?.error || `Backend error ${res.status}`)
+  try { json = JSON.parse(text) } catch { throw new ApiError(res.ok ? 'Backend returned a non-JSON response' : `Backend error ${res.status}`, res.status) }
+  if (!res.ok || json?.error) throw new ApiError(json?.error || `Backend error ${res.status}`, res.status)
   return json as T
 }
 

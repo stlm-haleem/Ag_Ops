@@ -13,6 +13,8 @@ interface Ctx {
   progress: string
   error: string | null
   backendOk: boolean
+  needsPasscode: boolean
+  submitPasscode: (p: string) => Promise<void>
   refresh: () => Promise<void>
   importExcel: (f: File) => Promise<{ uploaded: boolean; message: string }>
   switchToSheet: () => Promise<void>
@@ -36,15 +38,17 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const [progress, setProgress] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [backendOk, setBackendOk] = useState(false)
+  const [needsPasscode, setNeedsPasscode] = useState(false)
 
   const refresh = useCallback(async () => {
-    setLoading(true); setError(null)
+    setLoading(true); setError(null); setNeedsPasscode(false)
     try {
       const ds = await api.fetchDataset(setProgress)
       setDataset(ds); setBackendOk(true)
       if (ds.settings?.thresholds) setSettings(mergeSettings(ds.settings))
     } catch (e: any) {
       setBackendOk(false)
+      if (e?.status === 401) { setNeedsPasscode(true); return }
       const cached = await api.loadCached()
       if (cached) { setDataset({ ...cached, source: cached.source === 'excel' ? 'excel' : 'cache' }); setError(`Backend unavailable (${e.message}). Showing last data saved in this browser.`) }
       else setError(`Backend unavailable (${e.message}). Import your Excel file in Admin → Data Sources to get started.`)
@@ -78,6 +82,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
     } finally { setLoading(false); setProgress('') }
   }, [dataset])
 
+  const submitPasscode = useCallback(async (p: string) => { api.setPasscode(p); await refresh() }, [refresh])
+
   const switchToSheet = useCallback(async () => { await api.setMode('auto'); await refresh() }, [refresh])
 
   const updateSettings = useCallback(async (s: Settings) => {
@@ -100,5 +106,5 @@ export function DataProvider({ children }: { children: ReactNode }) {
     })
   }, [])
 
-  return <C.Provider value={{ dataset, rows, analytics, settings, loading, progress, error, backendOk, refresh, importExcel, switchToSheet, updateSettings, addAnalytics }}>{children}</C.Provider>
+  return <C.Provider value={{ dataset, rows, analytics, settings, loading, progress, error, backendOk, needsPasscode, submitPasscode, refresh, importExcel, switchToSheet, updateSettings, addAnalytics }}>{children}</C.Provider>
 }
