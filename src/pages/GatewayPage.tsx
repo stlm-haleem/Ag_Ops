@@ -10,17 +10,16 @@ import { GATEWAY_GROUPS, GROUPS, GROUP_LABEL, Group } from '../lib/types'
 type Tab = 'ALL' | Group
 
 export default function GatewayPage({ currency, gateway }: { currency: string; gateway: string }) {
-  const { rows, loading, settings, updateSettings } = useData()
+  const { rows, loading, settings } = useData()
   const groups = GATEWAY_GROUPS[gateway] ?? GROUPS
   const [tab, setTab] = useState<Tab>('ALL')
-  const gwKey = `${currency}-${gateway}`
-  const gwThreshold = settings.gatewayBalance?.[gwKey]?.high ?? 0
-  const [thDraft, setThDraft] = useState<string | null>(null)
-  const [thSaved, setThSaved] = useState(false)
   const [flag, setFlag] = useState<Flag>('all')
+  const [loginStatus, setLoginStatus] = useState('')
 
   const gwRows = useMemo(() => rows.filter(r => r.currency === currency && r.gateway === gateway), [rows, currency, gateway])
-  const scoped = useMemo(() => (tab === 'ALL' ? gwRows : gwRows.filter(r => r.group === tab)), [gwRows, tab])
+  const loginStatuses = useMemo(() => [...new Set(gwRows.map(r => r.login))].sort(), [gwRows])
+  const statusRows = useMemo(() => !loginStatus ? gwRows : gwRows.filter(r => r.login === loginStatus), [gwRows, loginStatus])
+  const scoped = useMemo(() => (tab === 'ALL' ? statusRows : statusRows.filter(r => r.group === tab)), [statusRows, tab])
   const visualRows = useMemo(() => gateway === 'SSG' ? scoped.filter(r => r.wallet.trim() !== '' && r.wallet.trim().toUpperCase() !== 'IBBL') : scoped, [scoped, gateway])
   const k = useMemo(() => kpis(scoped), [scoped])
   const visualK = useMemo(() => kpis(visualRows), [visualRows])
@@ -34,13 +33,6 @@ export default function GatewayPage({ currency, gateway }: { currency: string; g
   ]
   const activeGroup: Group | null = tab === 'ALL' ? (groups.length === 1 ? groups[0] : null) : tab
   const th = activeGroup ? settings.thresholds[activeGroup] : null
-  const gwTotal = useMemo(() => kpis(gwRows).rBal, [gwRows])
-  const gwOver = gwThreshold > 0 && gwTotal > gwThreshold
-  const saveThreshold = async () => {
-    await updateSettings({ ...settings, gatewayBalance: { ...settings.gatewayBalance, [gwKey]: { high: Math.max(0, Number(thDraft) || 0) } } })
-    setThDraft(null); setThSaved(true)
-  }
-
   if (!gwRows.length) return (
     <>
       <PageTitle title={`${currency} · ${gateway}`} />
@@ -48,7 +40,7 @@ export default function GatewayPage({ currency, gateway }: { currency: string; g
     </>
   )
 
-  const count = (g: Tab) => (g === 'ALL' ? gwRows.length : gwRows.filter(r => r.group === g).length)
+  const count = (g: Tab) => (g === 'ALL' ? statusRows.length : statusRows.filter(r => r.group === g).length)
   const pick = (f: Flag) => setFlag(flag === f ? 'all' : f)
 
   return (
@@ -62,6 +54,14 @@ export default function GatewayPage({ currency, gateway }: { currency: string; g
             {t === 'ALL' ? 'All' : GROUP_LABEL[t]} <span className="ml-1 text-xs text-slate-400">{fmt(count(t))}</span>
           </button>
         ))}
+      </div>}
+
+      {gateway === 'SSG' && <div className="flex flex-wrap items-center gap-3 rounded-xl bg-white p-3 shadow-sm ring-1 ring-slate-200">
+        <label className="text-sm font-medium text-slate-600" htmlFor="dashboard-login-status">Login status</label>
+        <select id="dashboard-login-status" className="input min-w-48" value={loginStatus} onChange={e => setLoginStatus(e.target.value)}>
+          <option value="">All login statuses</option>
+          {loginStatuses.map(status => <option key={status} value={status}>{status}</option>)}
+        </select>
       </div>}
 
       <Section title="Alerts (click to filter the table)" right={th && <span className="text-xs text-slate-400">Low &lt; {fmt(th.low)} · High &gt; SDP (fallback {gateway === 'MCG' ? '50,000' : '100,000'}) · Discrep. ≥ {fmt(th.discrep)} (Settings)</span>}>
@@ -82,32 +82,13 @@ export default function GatewayPage({ currency, gateway }: { currency: string; g
       <Section title="Balances & flow">
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 xl:grid-cols-8">
           <Kpi label="Accounts" value={fmt(k.accounts)} sub={`${fmt(k.loggedIn)} ${gateway === 'MCG' ? 'active' : 'logged in'}`} />
-          <Kpi label="Running balance" value={compact(k.rBal)} sub={gwOver && tab === 'ALL' ? `HIGH · above ${compact(gwThreshold)}` : fmt(k.rBal, 2)} tone={gwOver && tab === 'ALL' ? 'warn' : 'info'} />
+          <Kpi label="Running balance" value={compact(k.rBal)} sub={fmt(k.rBal, 2)} tone="info" />
           <Kpi label="Actual balance" value={compact(k.aBal)} sub={fmt(k.aBal, 2)} tone="info" />
           <Kpi label="Net discrepancy" value={compact(k.discrep)} sub="R. Bal − A. Bal" tone={k.discrep === 0 ? 'good' : 'warn'} />
           <Kpi label="Deposit" value={compact(k.deposit)} sub={fmt(k.deposit)} tone="good" />
           <Kpi label="Withdrawal" value={compact(k.withdrawal)} sub={fmt(k.withdrawal)} />
           <Kpi label="Adjustment" value={compact(k.adjustment)} sub={fmt(k.adjustment)} />
           <Kpi label="Total flow" value={compact(k.flow)} sub="Deposit + Withdrawal" />
-        </div>
-      </Section>
-
-      <Section title={`${gateway} running-balance threshold`}>
-        <div className={`card flex flex-wrap items-center gap-4 p-4 ${gwOver ? 'border-amber-400 bg-amber-50' : ''}`}>
-          <div className="min-w-0 flex-1">
-            <div className="text-sm font-medium text-slate-700">Total {gateway} running balance: <span className="tabular-nums">{fmt(gwTotal, 2)}</span></div>
-            <div className="mt-0.5 text-sm">
-              {gwThreshold > 0
-                ? gwOver ? <span className="font-semibold text-amber-700">HIGH — above your threshold of {fmt(gwThreshold)} by {fmt(gwTotal - gwThreshold)}</span>
-                         : <span className="text-emerald-600">Within your threshold of {fmt(gwThreshold)} ({fmt((gwTotal / gwThreshold) * 100, 0)}% used)</span>
-                : <span className="text-slate-500">No threshold set. Enter the total running balance above which {gateway} should be flagged as high.</span>}
-            </div>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <input type="number" inputMode="decimal" min={0} className="input w-44" placeholder="High above…" value={thDraft ?? (gwThreshold || '')} onChange={e => { setThDraft(e.target.value); setThSaved(false) }} />
-            <button className="btn-primary" disabled={thDraft === null} onClick={saveThreshold}>Save threshold</button>
-            {thSaved && thDraft === null && <span className="text-sm text-emerald-600">Saved</span>}
-          </div>
         </div>
       </Section>
 

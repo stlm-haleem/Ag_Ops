@@ -29,7 +29,6 @@ export const useData = () => useContext(C)
 const SETTINGS_KEY = 'settings-v1'
 const mergeSettings = (s?: Partial<Settings>): Settings => ({
   thresholds: { ...DEFAULT_SETTINGS.thresholds, ...(s?.thresholds ?? {}) },
-  gatewayBalance: { ...DEFAULT_SETTINGS.gatewayBalance, ...(s?.gatewayBalance ?? {}) },
 })
 const readLocalSettings = (): Settings | null => { try { const v = localStorage.getItem(SETTINGS_KEY); return v ? mergeSettings(JSON.parse(v)) : null } catch { return null } }
 
@@ -61,7 +60,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       setDataset(ds)
       await api.cacheDataset(ds)
       setBackendOk(true)
-      if (ds.settings?.thresholds || ds.settings?.gatewayBalance) setSettings(mergeSettings(ds.settings))
+      if (ds.settings?.thresholds) setSettings(mergeSettings(ds.settings))
     } catch (e: any) {
       setBackendOk(false)
       if (e?.status === 401) {

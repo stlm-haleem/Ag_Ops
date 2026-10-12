@@ -86,8 +86,6 @@ export interface Dataset {
 export interface Threshold { low: number; high: number; discrep: number }
 export interface Settings {
   thresholds: Record<Group, Threshold>
-  /** Total running-balance threshold per gateway, keyed like 'BDT-SSG'. high = 0 means not set. */
-  gatewayBalance: Record<string, { high: number }>
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -100,5 +98,4 @@ export const DEFAULT_SETTINGS: Settings = {
     PERMANENT_STOP: { low: 5000, high: 100000, discrep: 10000 },
     MCG: { low: 1000, high: 30000, discrep: 5000 },
   },
-  gatewayBalance: { 'BDT-SSG': { high: 0 }, 'BDT-MCG': { high: 0 } },
 }
