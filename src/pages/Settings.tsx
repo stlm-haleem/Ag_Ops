@@ -26,7 +26,7 @@ export default function SettingsPage() {
         </table>
       </div>
       <div className="card space-y-3 p-4">
-        <div className="text-sm text-slate-600">Higher balance is determined per account: R. Bal above SDP is high; when SDP is blank or 0, the fallback is 100,000 for SSG and 50,000 for MCG.</div>
+        <div className="text-sm text-slate-600">Higher balance is determined per account: R. Bal above SDP is high; when SDP is blank or 0, the fallback is 100,000 for BDT SSG and 50,000 for MCG. <b>PKR SSG</b> has no fallback: an account without an SDP is treated as a locked account and is never flagged as higher balance.</div>
         <div className="text-sm font-semibold text-slate-700">Gateway total running balance — flag as HIGH above</div>
         <div className="flex flex-wrap gap-4">
           {Object.keys(draft.gatewayBalance).map(key => (
@@ -41,6 +41,7 @@ export default function SettingsPage() {
         <div><b>Limit exceeded</b> = Deposit &gt; utilized limit. Utilized limit is <i>DP Bal Limit</i>; if it is blank/0, the merchant limit <i>MRC LMT</i> is used.</div>
         <div><b>Running balance</b> = Opening + Deposit − Withdrawal − Adjustment. <b>Discrepancy</b> = Running − Actual.</div>
         <div><b>MCG</b> has no DP Bal Limit, so its utilized limit is <i>MRC. Limit</i>. Its Wallet Balance is used as the actual balance, and Active / Disabled / Suspended is derived from Status and Transaction Status.</div>
+        <div><b>PKR SSG</b> status uses the sheet's icons: ✅ login yes (Logged In), ⭕ login no (Logged Out), 🔒 Locked. Its running balance uses the same formula as BDT SSG, and its utilized limit is DP AVAILABLE LIMIT.</div>
         <div>All accounts are counted in the KPIs (logged in, logged out and locked). Critical is intentionally not flagged yet.</div>
       </div>
       <div className="flex items-center gap-3">

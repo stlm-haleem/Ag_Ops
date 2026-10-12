@@ -78,7 +78,7 @@ export default function DataSources() {
 
       <div className="card space-y-3 p-5">
         <div className="font-semibold">Daily totals (feeds the time-series chart)</div>
-        <p className="text-sm text-slate-600">SSG and MCG totals are recorded automatically at the end of each day (sum of Deposit and Withdrawal across the gateway's tabs, saved with the note “auto”). You can also record by hand below; a manual entry is never overwritten by the automatic job. Saving the same date/currency/gateway again updates that record instead of duplicating it. Operational imports never erase this history.</p>
+        <p className="text-sm text-slate-600">BDT SSG, BDT MCG and PKR SSG totals are recorded automatically at the end of each day (sum of Deposit and Withdrawal across the gateway's tabs, saved with the note “auto”). You can also record by hand below; a manual entry is never overwritten by the automatic job. Saving the same date/currency/gateway again updates that record instead of duplicating it. Operational imports never erase this history.</p>
         <div className="flex flex-wrap items-end gap-3">
           <label className="text-xs text-slate-500">Date<input type="date" className="input mt-1 block" value={rec.date} onChange={e => setRec({ ...rec, date: e.target.value })} /></label>
           <label className="text-xs text-slate-500">Currency<select className="input mt-1 block" value={rec.currency} onChange={e => setRec({ ...rec, currency: e.target.value })}><option>BDT</option><option>PKR</option><option>INR</option></select></label>
@@ -86,7 +86,7 @@ export default function DataSources() {
           <label className="text-xs text-slate-500">Total deposit<input type="number" className="input mt-1 block w-40" value={rec.deposit} onChange={e => setRec({ ...rec, deposit: e.target.value })} /></label>
           <label className="text-xs text-slate-500">Total withdrawal<input type="number" className="input mt-1 block w-40" value={rec.withdrawal} onChange={e => setRec({ ...rec, withdrawal: e.target.value })} /></label>
           <label className="text-xs text-slate-500">Note<input className="input mt-1 block w-56" value={rec.note} onChange={e => setRec({ ...rec, note: e.target.value })} /></label>
-          <button className="btn" onClick={recordNow} disabled={!backendOk}>Record today's totals now (SSG + MCG)</button>
+          <button className="btn" onClick={recordNow} disabled={!backendOk}>Record today's totals now (all gateways)</button>
           <button className="btn" onClick={prefill} disabled={!rows.length}>Prefill from current sheet totals</button>
           <button className="btn-primary" onClick={saveRec} disabled={!rec.date}>Save record</button>
         </div>

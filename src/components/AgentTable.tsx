@@ -4,6 +4,7 @@ import { AgentRow, GROUP_LABEL } from '../lib/types'
 import { fmt } from '../lib/metrics'
 import { Badge, HealthBadge } from './ui'
 
+const STATE_ICON: Record<string, string> = { 'Logged In': '✅', 'Logged Out': '⭕', Locked: '🔒' }
 const stateTone = (s: string) => (s === 'Logged In' || s === 'Active' ? 'green' : s === 'Logged Out' || s === 'Disabled' ? 'slate' : 'red') as 'green' | 'slate' | 'red'
 
 export type Flag = 'all' | 'low' | 'high' | 'healthy' | 'discrep' | 'limit'
@@ -13,8 +14,9 @@ type Col = { key: keyof AgentRow | 'flags'; label: string; num?: boolean; render
 
 const money = (n: number) => <span className={n < 0 ? 'text-rose-600' : ''}>{fmt(n, 2)}</span>
 
-export default function AgentTable({ rows, showType, flag, onFlag, gateway }: { rows: AgentRow[]; showType: boolean; flag: Flag; onFlag: (f: Flag) => void; gateway?: string }) {
+export default function AgentTable({ rows, showType, flag, onFlag, gateway, currency }: { rows: AgentRow[]; showType: boolean; flag: Flag; onFlag: (f: Flag) => void; gateway?: string; currency?: string }) {
   const isMcg = gateway === 'MCG'
+  const isPkr = currency === 'PKR'
   const secKey = isMcg ? 'code' : 'limitStatus'
   const [q, setQ] = useState('')
   const [wallet, setWallet] = useState('')
@@ -51,24 +53,32 @@ export default function AgentTable({ rows, showType, flag, onFlag, gateway }: { 
     { key: 'account', label: 'Account' },
     { key: 'group', label: 'Type', render: r => <Badge tone="purple">{GROUP_LABEL[r.group]}</Badge>, hideInGroup: true },
     { key: 'wallet', label: 'Wallet' },
-    { key: 'login', label: 'Status', render: r => <Badge tone={stateTone(r.login)}>{r.login}</Badge> },
-    { key: 'code', label: 'Txn status', hideInGroup: false },
+    { key: 'login', label: 'Status', render: r => <Badge tone={stateTone(r.login)}>{isPkr ? `${STATE_ICON[r.login] ?? ''} ` : ''}{r.login}</Badge> },
+    { key: 'code', label: isPkr ? 'Group code' : 'Txn status', hideInGroup: false },
+    { key: 'whrs', label: 'Working hrs' },
     { key: 'actSdp', label: isMcg ? 'SDP' : 'ACT SDP', num: true },
     { key: 'mrcLmt', label: isMcg ? 'MRC limit' : 'MRC LMT', num: true },
-    { key: 'utilizedLimit', label: 'Utilized limit', num: true },
+    { key: 'utilizedLimit', label: isPkr ? 'DP avail. limit' : 'Utilized limit', num: true },
     { key: 'opening', label: 'Opening', num: true },
     { key: 'deposit', label: 'Deposit', num: true },
     { key: 'withdrawal', label: 'Withdrawal', num: true },
     { key: 'adjustment', label: 'Adjust.', num: true },
+    { key: 'unconfirmedWd', label: 'Unconf. WD', num: true },
+    { key: 'charge', label: 'Charge', num: true },
+    { key: 'commission', label: 'Commission', num: true },
+    { key: 'topUp', label: 'Top up', num: true },
     { key: 'rBal', label: 'R. Bal', num: true },
     { key: 'aBal', label: 'A. Bal', num: true },
     { key: 'discrep', label: 'Discrep.', num: true },
     { key: 'health', label: 'Balance', render: r => <HealthBadge h={r.health} /> },
     { key: 'flags', label: 'Alerts', render: r => <span className="flex gap-1">{r.highDiscrep && <Badge tone="red">Discrep.</Badge>}{r.limitExceeded && <Badge tone="amber">Limit exceeded</Badge>}</span> },
-    { key: 'limitStatus', label: 'Limit status' },
+    { key: 'limitStatus', label: isPkr ? 'Exceed' : 'Limit status' },
+    { key: 'sdpPaid', label: 'SDP paid', num: true },
     { key: 'remarks', label: isMcg ? 'Status remark' : 'Remarks' },
   ]
-  const visible = cols.filter(c => (showType || !c.hideInGroup) && (isMcg ? c.key !== 'utilizedLimit' && c.key !== 'limitStatus' : c.key !== 'code'))
+  const PKR_ONLY: string[] = ['unconfirmedWd', 'charge', 'commission', 'topUp', 'sdpPaid', 'whrs']
+  const visible = cols.filter(c => (showType || !c.hideInGroup) &&
+    (isPkr ? c.key !== 'mrcLmt' : !PKR_ONLY.includes(c.key as string) && (isMcg ? c.key !== 'utilizedLimit' && c.key !== 'limitStatus' : c.key !== 'code')))
 
   const exportCsv = () => {
     const head = ['Account', 'Type', 'Wallet', 'Status', 'ACT SDP', 'MRC LMT', 'Utilized limit', 'Opening', 'Deposit', 'Withdrawal', 'Adjustment', 'R.BAL', 'A.BAL', 'Discrep', 'Balance', 'High discrep', 'Limit exceeded', 'Limit status / Txn status', 'Remarks']

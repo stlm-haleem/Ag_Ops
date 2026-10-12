@@ -20,7 +20,7 @@ export default function App() {
         <Route path="/currency/bdt/mcg" element={<GatewayPage key="mcg" currency="BDT" gateway="MCG" />} />
         <Route path="/currency/bdt/local-bank" element={<Placeholder title="BDT · Local Bank" />} />
         <Route path="/currency/pkr" element={<Placeholder title="PKR Overview" />} />
-        <Route path="/currency/pkr/ssg" element={<Placeholder title="PKR · SSG" />} />
+        <Route path="/currency/pkr/ssg" element={<GatewayPage key="pkr-ssg" currency="PKR" gateway="SSG" />} />
         <Route path="/currency/pkr/bangkok-pay" element={<Placeholder title="PKR · Bangkok-Pay" />} />
         <Route path="/currency/pkr/local-bank" element={<Placeholder title="PKR · Local Bank" />} />
         <Route path="/currency/inr" element={<Placeholder title="INR" note="INR is not live yet." />} />

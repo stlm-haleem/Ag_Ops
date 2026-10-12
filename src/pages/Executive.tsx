@@ -9,7 +9,7 @@ import { GROUPS, GROUP_LABEL } from '../lib/types'
 
 export default function Executive() {
   const { rows, analytics, loading, settings } = useData()
-  const [currency, setCurrency] = useState('')
+  const [currency, setCurrency] = useState('BDT')
   const [gateway, setGateway] = useState('')
   const [wallet, setWallet] = useState('')
   const [login, setLogin] = useState('')
@@ -19,16 +19,18 @@ export default function Executive() {
   const wallets = useMemo(() => [...new Set(rows.map(r => r.wallet))].sort(), [rows])
   const gateways = useMemo(() => [...new Set(rows.map(r => r.gateway))].sort(), [rows])
   const states = useMemo(() => [...new Set(rows.map(r => r.login))].filter(Boolean).sort(), [rows])
-  const gwCards = useMemo(() => gateways.map(g => {
-    const gr = rows.filter(r => r.gateway === g)
-    const cur = gr[0]?.currency ?? 'BDT'
+  // One card per currency + gateway (BDT-SSG and PKR-SSG must not be summed together).
+  const gwCards = useMemo(() => [...new Set(rows.map(r => `${r.currency}-${r.gateway}`))].sort().map(key => {
+    const gr = rows.filter(r => `${r.currency}-${r.gateway}` === key)
+    const cur = gr[0].currency, g = gr[0].gateway
     const total = kpis(gr).rBal
-    const high = settings.gatewayBalance?.[`${cur}-${g}`]?.high ?? 0
-    return { gateway: g, currency: cur, total, high, over: high > 0 && total > high, agents: gr.length }
-  }), [gateways, rows, settings])
+    const high = settings.gatewayBalance?.[key]?.high ?? 0
+    return { key, gateway: g, currency: cur, total, high, over: high > 0 && total > high, agents: gr.length }
+  }), [rows, settings])
   const scoped = useMemo(() => rows.filter(r => (!currency || r.currency === currency) && (!gateway || r.gateway === gateway) && (!wallet || r.wallet === wallet) && (!login || r.login === login)), [rows, currency, gateway, wallet, login])
   const k = useMemo(() => kpis(scoped), [scoped])
   const bdt = useMemo(() => kpis(rows.filter(r => r.currency === 'BDT')), [rows])
+  const pkr = useMemo(() => kpis(rows.filter(r => r.currency === 'PKR')), [rows])
 
   const series = useMemo(() => {
     const m = new Map<string, { date: string; deposit: number; withdrawal: number }>()
@@ -51,16 +53,16 @@ export default function Executive() {
 
   return (
     <>
-      <PageTitle title="Executive Dashboard" subtitle="Division-wide view. Live today: BDT · SSG and BDT · MCG (other gateways and currencies will appear as they are connected)." />
+      <PageTitle title="Executive Dashboard" subtitle="Division-wide view. Live today: BDT · SSG, BDT · MCG and PKR · SSG (other gateways and currencies will appear as they are connected)." />
 
       <div className="card flex flex-wrap items-end gap-3 p-3">
-        {sel(currency, setCurrency, 'Currency', ['BDT'])}
+        {sel(currency, setCurrency, 'Currency', ['BDT', 'PKR'])}
         {sel(gateway, setGateway, 'Merchant / gateway', gateways)}
         {sel(wallet, setWallet, 'Wallet', wallets)}
         {sel(login, setLogin, 'Status', states)}
         <label className="text-xs text-slate-500">From<input type="date" className="input mt-1 block" value={from} onChange={e => setFrom(e.target.value)} /></label>
         <label className="text-xs text-slate-500">To<input type="date" className="input mt-1 block" value={to} onChange={e => setTo(e.target.value)} /></label>
-        <button className="btn" onClick={() => { setCurrency(''); setGateway(''); setWallet(''); setLogin(''); setFrom(''); setTo('') }}>Reset</button>
+        <button className="btn" onClick={() => { setCurrency('BDT'); setGateway(''); setWallet(''); setLogin(''); setFrom(''); setTo('') }}>Reset</button>
         <span className="ml-auto text-xs text-slate-400">Brand filter will be added once brand data exists in the sheets.</span>
       </div>
 
@@ -70,7 +72,7 @@ export default function Executive() {
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
           <Kpi label="Total running balance" value={compact(k.rBal)} sub={`Actual: ${compact(k.aBal)}`} tone="info" />
           <Kpi label="BDT balance" value={compact(bdt.rBal)} sub={fmt(bdt.rBal)} />
-          <Kpi label="PKR balance" value="—" sub="Not connected yet" />
+          <Kpi label="PKR balance" value={pkr.accounts ? compact(pkr.rBal) : '—'} sub={pkr.accounts ? fmt(pkr.rBal) : 'Not connected yet'} />
           <Kpi label="INR balance" value="—" sub="Not connected yet" />
         </div>
       </Section>
@@ -79,7 +81,7 @@ export default function Executive() {
         <Section title="Gateway running balance vs your threshold">
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {gwCards.map(c => (
-              <Link key={c.gateway} to={`/currency/${c.currency.toLowerCase()}/${c.gateway.toLowerCase()}`} className={`card p-4 hover:border-brand-500 ${c.over ? 'border-amber-400 bg-amber-50' : ''}`}>
+              <Link key={c.key} to={`/currency/${c.currency.toLowerCase()}/${c.gateway.toLowerCase()}`} className={`card p-4 hover:border-brand-500 ${c.over ? 'border-amber-400 bg-amber-50' : ''}`}>
                 <div className="flex items-center justify-between"><div className="font-semibold">{c.currency} · {c.gateway}</div>
                   {c.over ? <span className="rounded-full bg-amber-200 px-2 py-0.5 text-xs font-semibold text-amber-900">HIGH</span> : c.high > 0 ? <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700">OK</span> : <span className="text-xs text-slate-400">No threshold</span>}</div>
                 <div className="mt-1 text-xl font-semibold tabular-nums">{compact(c.total)}</div>

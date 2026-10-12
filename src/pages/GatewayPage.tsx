@@ -9,16 +9,29 @@ import { GATEWAY_GROUPS, GROUPS, GROUP_LABEL, Group } from '../lib/types'
 
 type Tab = 'ALL' | Group
 
+/** PKR-SSG login-status filter: checkbox per status, with the sheet's emoji legend. */
+const PKR_STATUSES = [
+  { value: 'Logged In', icon: '✅', label: 'Login: Yes' },
+  { value: 'Logged Out', icon: '⭕', label: 'Login: No' },
+  { value: 'Locked', icon: '🔒', label: 'Locked account' },
+]
+
 export default function GatewayPage({ currency, gateway }: { currency: string; gateway: string }) {
   const { rows, loading, settings } = useData()
-  const groups = GATEWAY_GROUPS[gateway] ?? GROUPS
+  const isPkr = currency === 'PKR'
+  const groups = GATEWAY_GROUPS[`${currency}-${gateway}`] ?? GROUPS
   const [tab, setTab] = useState<Tab>('ALL')
   const [flag, setFlag] = useState<Flag>('all')
   const [loginStatus, setLoginStatus] = useState('')
+  // PKR: statuses that are switched off. Locked accounts are hidden by default.
+  const [hiddenStates, setHiddenStates] = useState<Set<string>>(() => new Set(['Locked']))
+  const toggleState = (v: string) => setHiddenStates(prev => { const n = new Set(prev); if (n.has(v)) n.delete(v); else n.add(v); return n })
 
   const gwRows = useMemo(() => rows.filter(r => r.currency === currency && r.gateway === gateway), [rows, currency, gateway])
   const loginStatuses = useMemo(() => [...new Set(gwRows.map(r => r.login))].sort(), [gwRows])
-  const statusRows = useMemo(() => !loginStatus ? gwRows : gwRows.filter(r => r.login === loginStatus), [gwRows, loginStatus])
+  const statusRows = useMemo(() => isPkr
+    ? gwRows.filter(r => !hiddenStates.has(r.login))
+    : !loginStatus ? gwRows : gwRows.filter(r => r.login === loginStatus), [gwRows, loginStatus, isPkr, hiddenStates])
   const scoped = useMemo(() => (tab === 'ALL' ? statusRows : statusRows.filter(r => r.group === tab)), [statusRows, tab])
   const visualRows = useMemo(() => gateway === 'SSG' ? scoped.filter(r => r.wallet.trim() !== '' && r.wallet.trim().toUpperCase() !== 'IBBL') : scoped, [scoped, gateway])
   const k = useMemo(() => kpis(scoped), [scoped])
@@ -56,7 +69,20 @@ export default function GatewayPage({ currency, gateway }: { currency: string; g
         ))}
       </div>}
 
-      {gateway === 'SSG' && <div className="flex flex-wrap items-center gap-3 rounded-xl bg-white p-3 shadow-sm ring-1 ring-slate-200">
+      {isPkr && <div className="flex flex-wrap items-center gap-x-5 gap-y-2 rounded-xl bg-white p-3 shadow-sm ring-1 ring-slate-200">
+        <span className="text-sm font-medium text-slate-600">Login status</span>
+        {PKR_STATUSES.map(st => {
+          const n = gwRows.filter(r => r.login === st.value).length
+          return (
+            <label key={st.value} className="flex cursor-pointer items-center gap-2 text-sm text-slate-700">
+              <input type="checkbox" className="h-4 w-4 accent-brand-600" checked={!hiddenStates.has(st.value)} onChange={() => toggleState(st.value)} />
+              <span>{st.icon} {st.label}</span><span className="text-xs text-slate-400">{fmt(n)}</span>
+            </label>
+          )
+        })}
+      </div>}
+
+      {gateway === 'SSG' && !isPkr && <div className="flex flex-wrap items-center gap-3 rounded-xl bg-white p-3 shadow-sm ring-1 ring-slate-200">
         <label className="text-sm font-medium text-slate-600" htmlFor="dashboard-login-status">Login status</label>
         <select id="dashboard-login-status" className="input min-w-48" value={loginStatus} onChange={e => setLoginStatus(e.target.value)}>
           <option value="">All login statuses</option>
@@ -64,9 +90,9 @@ export default function GatewayPage({ currency, gateway }: { currency: string; g
         </select>
       </div>}
 
-      <Section title="Alerts (click to filter the table)" right={th && <span className="text-xs text-slate-400">Low &lt; {fmt(th.low)} · High &gt; SDP (fallback {gateway === 'MCG' ? '50,000' : '100,000'}) · Discrep. ≥ {fmt(th.discrep)} (Settings)</span>}>
+      <Section title="Alerts (click to filter the table)" right={th && <span className="text-xs text-slate-400">Low &lt; {fmt(th.low)} · High &gt; SDP ({isPkr ? 'no SDP = locked account' : `fallback ${gateway === 'MCG' ? '50,000' : '100,000'}`}) · Discrep. ≥ {fmt(th.discrep)} (Settings)</span>}>
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-          <Kpi label="Higher balance agents" value={fmt(k.high)} tone="warn" sub={`R. Bal above SDP (fallback ${gateway === 'MCG' ? '50,000' : '100,000'})`} onClick={() => pick('high')} active={flag === 'high'} />
+          <Kpi label="Higher balance agents" value={fmt(k.high)} tone="warn" sub={isPkr ? 'R. Bal above SDP' : `R. Bal above SDP (fallback ${gateway === 'MCG' ? '50,000' : '100,000'})`} onClick={() => pick('high')} active={flag === 'high'} />
           <Kpi label="Low balance agents" value={fmt(k.low)} tone="bad" sub="R. Bal below low threshold (incl. negative)" onClick={() => pick('low')} active={flag === 'low'} />
           <Kpi label="High discrepancy agents" value={fmt(k.highDiscrep)} tone="bad" sub="|R. Bal − A. Bal| above threshold" onClick={() => pick('discrep')} active={flag === 'discrep'} />
           <Kpi label="Limit exceeded" value={fmt(k.limitExceeded)} tone="warn" sub="Deposit > utilized limit" onClick={() => pick('limit')} active={flag === 'limit'} />
@@ -130,7 +156,7 @@ export default function GatewayPage({ currency, gateway }: { currency: string; g
       </div>
 
       <Section title={`Accounts — ${tab === 'ALL' ? (groups.length > 1 ? 'All types' : GROUP_LABEL[groups[0]]) : GROUP_LABEL[tab]}`}>
-        <AgentTable rows={scoped} showType={tab === 'ALL' && groups.length > 1} flag={flag} onFlag={setFlag} gateway={gateway} />
+        <AgentTable rows={scoped} showType={tab === 'ALL' && groups.length > 1} flag={flag} onFlag={setFlag} gateway={gateway} currency={currency} />
       </Section>
     </>
   )

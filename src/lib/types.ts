@@ -1,9 +1,10 @@
-export type Group = 'AGENT' | 'PERSONAL' | 'VIP' | 'WITHDRAWAL' | 'PERMANENT_STOP' | 'MCG'
-export const GROUPS: Group[] = ['AGENT', 'PERSONAL', 'VIP', 'WITHDRAWAL', 'PERMANENT_STOP', 'MCG']
-/** Agent types shown as tabs for each gateway (a gateway with one type shows no tabs). */
+export type Group = 'AGENT' | 'PERSONAL' | 'VIP' | 'WITHDRAWAL' | 'PERMANENT_STOP' | 'MCG' | 'PKR_SSG'
+export const GROUPS: Group[] = ['AGENT', 'PERSONAL', 'VIP', 'WITHDRAWAL', 'PERMANENT_STOP', 'MCG', 'PKR_SSG']
+/** Agent types shown as tabs for each currency-gateway (one type shows no tabs). Keyed like 'BDT-SSG'. */
 export const GATEWAY_GROUPS: Record<string, Group[]> = {
-  SSG: ['AGENT', 'PERSONAL', 'VIP', 'WITHDRAWAL', 'PERMANENT_STOP'],
-  MCG: ['MCG'],
+  'BDT-SSG': ['AGENT', 'PERSONAL', 'VIP', 'WITHDRAWAL', 'PERMANENT_STOP'],
+  'BDT-MCG': ['MCG'],
+  'PKR-SSG': ['PKR_SSG'],
 }
 export const GROUP_LABEL: Record<Group, string> = {
   AGENT: 'Agents',
@@ -12,6 +13,7 @@ export const GROUP_LABEL: Record<Group, string> = {
   WITHDRAWAL: 'Withdrawal only',
   PERMANENT_STOP: 'Permanent Stop',
   MCG: 'MCG Agents',
+  PKR_SSG: 'PKR SSG Agents',
 }
 
 /** Sheet tab name -> group. Add new tabs here when more gateways go live. */
@@ -22,11 +24,14 @@ export const SHEET_GROUP: Record<string, { group: Group; currency: string; gatew
   'BDT-SSG-WITHDRAWAL-ONLY': { group: 'WITHDRAWAL', currency: 'BDT', gateway: 'SSG' },
   'BDT-SSG-PERMANENT-STOP': { group: 'PERMANENT_STOP', currency: 'BDT', gateway: 'SSG' },
   'BDT-MCG': { group: 'MCG', currency: 'BDT', gateway: 'MCG' },
+  'PKR-SSG': { group: 'PKR_SSG', currency: 'PKR', gateway: 'SSG' },
 }
 export const DATA_SHEETS = Object.keys(SHEET_GROUP)
+/** Tabs filled automatically by an Apps Script sync; Excel imports must never wipe them. */
+export const SYNCED_SHEETS = ['PKR-SSG']
 
 export type Health = 'low' | 'high' | 'healthy'
-/** SSG: Logged In / Logged Out / Locked. MCG: Active / Disabled / Suspended / Inactive / Locked. */
+/** SSG (BDT and PKR): Logged In / Logged Out / Locked. MCG: Active / Disabled / Suspended / Inactive / Locked. */
 export type LoginState = string
 
 export interface AgentRow {
@@ -44,6 +49,12 @@ export interface AgentRow {
   deposit: number
   withdrawal: number
   adjustment: number
+  /** PKR-SSG only (0 elsewhere) */
+  unconfirmedWd: number
+  charge: number
+  commission: number
+  topUp: number
+  sdpPaid: number
   /** OPENING + DEPOSIT - WITHDRAWAL - ADJUSTMENT */
   rBal: number
   aBal: number
@@ -99,6 +110,8 @@ export const DEFAULT_SETTINGS: Settings = {
     // Initial defaults match Withdrawal only; adjust in Admin → Settings to your operating thresholds.
     PERMANENT_STOP: { low: 5000, high: 100000, discrep: 10000 },
     MCG: { low: 1000, high: 30000, discrep: 5000 },
+    // 'high' is unused for PKR SSG: higher balance is judged against each account's SDP.
+    PKR_SSG: { low: 5000, high: 50000, discrep: 10000 },
   },
-  gatewayBalance: { 'BDT-SSG': { high: 0 }, 'BDT-MCG': { high: 0 } },
+  gatewayBalance: { 'BDT-SSG': { high: 0 }, 'BDT-MCG': { high: 0 }, 'PKR-SSG': { high: 0 } },
 }

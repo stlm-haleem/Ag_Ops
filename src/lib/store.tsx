@@ -2,7 +2,7 @@ import { createContext, ReactNode, useCallback, useContext, useEffect, useMemo, 
 import * as api from './api'
 import { parseExcel } from './excel'
 import { normalize } from './normalize'
-import { AgentRow, AnalyticsEntry, DEFAULT_SETTINGS, Dataset, Settings } from './types'
+import { AgentRow, AnalyticsEntry, DEFAULT_SETTINGS, Dataset, SYNCED_SHEETS, Settings } from './types'
 
 interface Ctx {
   dataset: Dataset | null
@@ -131,9 +131,10 @@ export function DataProvider({ children }: { children: ReactNode }) {
       // A named single-sheet import replaces only its matching tab in the local view;
       // a full workbook import replaces the complete operational dataset. Daily analytics
       // are always preserved independently of operational imports.
+      // Tabs synced by Apps Script (PKR-SSG) are never touched by a full-workbook import.
       const mergedSheets = parsed.importTargetSheet && dataset
         ? [...dataset.sheets.filter(s => s.name !== parsed.importTargetSheet), ...parsed.sheets]
-        : parsed.sheets
+        : [...(dataset?.sheets.filter(s => SYNCED_SHEETS.includes(s.name) && !parsed.sheets.some(p => p.name === s.name)) ?? []), ...parsed.sheets]
       const next: Dataset = {
         ...parsed,
         source: 'excel',
