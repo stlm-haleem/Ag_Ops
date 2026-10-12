@@ -16,8 +16,8 @@ export default function App() {
         <Route path="/operations/high" element={<Placeholder title="High Balance" />} />
         <Route path="/operations/alerts" element={<Placeholder title="Alerts" />} />
         <Route path="/currency/bdt" element={<CurrencyOverview currency="BDT" />} />
-        <Route path="/currency/bdt/ssg" element={<GatewayPage currency="BDT" gateway="SSG" />} />
-        <Route path="/currency/bdt/mcg" element={<Placeholder title="BDT · MCG" />} />
+        <Route path="/currency/bdt/ssg" element={<GatewayPage key="ssg" currency="BDT" gateway="SSG" />} />
+        <Route path="/currency/bdt/mcg" element={<GatewayPage key="mcg" currency="BDT" gateway="MCG" />} />
         <Route path="/currency/bdt/local-bank" element={<Placeholder title="BDT · Local Bank" />} />
         <Route path="/currency/pkr" element={<Placeholder title="PKR Overview" />} />
         <Route path="/currency/pkr/ssg" element={<Placeholder title="PKR · SSG" />} />

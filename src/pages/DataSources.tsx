@@ -2,7 +2,7 @@ import { useRef, useState } from 'react'
 import { Database, FileSpreadsheet, RefreshCw, Upload } from 'lucide-react'
 import { PageTitle } from '../components/Layout'
 import { Badge } from '../components/ui'
-import { getPasscode, setPasscode } from '../lib/api'
+import { getPasscode, recordDaily, setPasscode } from '../lib/api'
 import { detectImportTarget, importTargetLabel } from '../lib/excel'
 import { fmt } from '../lib/metrics'
 import { useData } from '../lib/store'
@@ -30,9 +30,17 @@ export default function DataSources() {
   }
 
   const prefill = () => setRec(r => ({ ...r, deposit: String(rows.reduce((s, x) => s + x.deposit, 0)), withdrawal: String(rows.reduce((s, x) => s + x.withdrawal, 0)) }))
+  const recordNow = async () => {
+    try {
+      const r = await recordDaily()
+      setRecMsg(r.recorded.length ? `Recorded today's totals for ${r.recorded.map(x => x.gateway).join(', ')}.` : 'Nothing recorded.')
+      if (r.skipped?.length) setRecMsg(m => m + ' Skipped (manual entry kept): ' + r.skipped.join(', '))
+      await refresh()
+    } catch (e: any) { setRecMsg('Could not record: ' + e.message) }
+  }
   const saveRec = async () => {
     try {
-      await addAnalytics([{ date: rec.date, currency: rec.currency, gateway: rec.gateway, deposit: Number(rec.deposit) || 0, withdrawal: Number(rec.withdrawal) || 0, note: rec.note }])
+      await addAnalytics([{ date: rec.date, currency: rec.currency, gateway: rec.gateway, deposit: Number(rec.deposit) || 0, withdrawal: Number(rec.withdrawal) || 0, note: rec.note.trim() || 'manual' }])
       setRecMsg('Saved to Analytics.')
     } catch (e: any) { setRecMsg('Could not save: ' + e.message) }
   }
@@ -56,8 +64,8 @@ export default function DataSources() {
 
         <div className="card space-y-3 p-5">
           <div className="flex items-center gap-2 font-semibold"><FileSpreadsheet size={18} />Excel import (backup)</div>
-          <p className="text-sm text-slate-600">Upload one sheet at a time or a full workbook. A filename such as <b>monitoring_vip_20261008_121023.xlsx</b> is recognized as <b>BDT-SSG-VIP</b>; only that tab and its Drive backup are replaced. If the filename does not identify a tab, recognized operational tabs in the workbook are imported as a full replacement. Daily analytics history is always preserved.</p>
-          <input ref={fileRef} type="file" accept=".xlsx,.xlsm" className="hidden" onChange={e => onFile(e.target.files?.[0])} />
+          <p className="text-sm text-slate-600">Upload one sheet at a time or a full workbook. A filename such as <b>monitoring_vip_20261008_121023.xlsx</b> is recognized as <b>BDT-SSG-VIP</b>, and one containing <b>mcg</b> (for example <b>MAIN_AN - BDT-MCG.csv</b>) as <b>BDT-MCG</b>; only that tab and its Drive backup are replaced. CSV files are accepted. If the filename does not identify a tab, recognized operational tabs in the workbook are imported as a full replacement. Daily analytics history is always preserved.</p>
+          <input ref={fileRef} type="file" accept=".xlsx,.xlsm,.csv" className="hidden" onChange={e => onFile(e.target.files?.[0])} />
           <button className="btn-primary" disabled={loading} onClick={() => fileRef.current?.click()}><Upload size={14} />Choose Excel file…</button>
           {loading && progress && <div className="text-sm text-slate-500">{progress}</div>}
           {msg && <div className={`text-sm ${msg.ok ? 'text-emerald-600' : 'text-amber-700'}`}>{msg.text}</div>}
@@ -70,7 +78,7 @@ export default function DataSources() {
 
       <div className="card space-y-3 p-5">
         <div className="font-semibold">Daily totals (feeds the time-series chart)</div>
-        <p className="text-sm text-slate-600">Record the daily total by date, currency, and merchant/gateway. Saving the same date/currency/gateway again updates that record instead of duplicating it. Operational imports never erase this history.</p>
+        <p className="text-sm text-slate-600">SSG and MCG totals are recorded automatically at the end of each day (sum of Deposit and Withdrawal across the gateway's tabs, saved with the note “auto”). You can also record by hand below; a manual entry is never overwritten by the automatic job. Saving the same date/currency/gateway again updates that record instead of duplicating it. Operational imports never erase this history.</p>
         <div className="flex flex-wrap items-end gap-3">
           <label className="text-xs text-slate-500">Date<input type="date" className="input mt-1 block" value={rec.date} onChange={e => setRec({ ...rec, date: e.target.value })} /></label>
           <label className="text-xs text-slate-500">Currency<select className="input mt-1 block" value={rec.currency} onChange={e => setRec({ ...rec, currency: e.target.value })}><option>BDT</option><option>PKR</option><option>INR</option></select></label>
@@ -78,6 +86,7 @@ export default function DataSources() {
           <label className="text-xs text-slate-500">Total deposit<input type="number" className="input mt-1 block w-40" value={rec.deposit} onChange={e => setRec({ ...rec, deposit: e.target.value })} /></label>
           <label className="text-xs text-slate-500">Total withdrawal<input type="number" className="input mt-1 block w-40" value={rec.withdrawal} onChange={e => setRec({ ...rec, withdrawal: e.target.value })} /></label>
           <label className="text-xs text-slate-500">Note<input className="input mt-1 block w-56" value={rec.note} onChange={e => setRec({ ...rec, note: e.target.value })} /></label>
+          <button className="btn" onClick={recordNow} disabled={!backendOk}>Record today's totals now (SSG + MCG)</button>
           <button className="btn" onClick={prefill} disabled={!rows.length}>Prefill from current sheet totals</button>
           <button className="btn-primary" onClick={saveRec} disabled={!rec.date}>Save record</button>
         </div>

@@ -1,3 +1,4 @@
+import { isActive } from './normalize'
 import { AgentRow } from './types'
 
 export interface Kpis {
@@ -19,7 +20,7 @@ export interface Kpis {
 export function kpis(rows: AgentRow[]): Kpis {
   const k: Kpis = { accounts: rows.length, loggedIn: 0, rBal: 0, aBal: 0, discrep: 0, deposit: 0, withdrawal: 0, adjustment: 0, flow: 0, high: 0, low: 0, highDiscrep: 0, limitExceeded: 0 }
   for (const r of rows) {
-    if (r.login === 'Logged In') k.loggedIn++
+    if (isActive(r)) k.loggedIn++
     k.rBal += r.rBal; k.aBal += r.aBal; k.discrep += r.discrep
     k.deposit += r.deposit; k.withdrawal += r.withdrawal; k.adjustment += r.adjustment
     if (r.health === 'high') k.high++

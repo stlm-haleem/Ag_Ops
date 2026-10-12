@@ -151,6 +151,8 @@ export async function uploadImport(ds: Dataset, onProgress?: (msg: string) => vo
   return result
 }
 
+/** Ask Apps Script to record today's deposit/withdrawal totals now (same job as the end-of-day trigger). */
+export const recordDaily = () => call<{ ok: boolean; recorded: AnalyticsEntry[]; skipped: string[] }>('recordDaily', {}, {})
 export const setMode = (mode: 'auto' | 'drive') => call('setMode', { mode })
 export const saveAnalytics = (entries: AnalyticsEntry[]) => call('saveAnalytics', {}, { entries })
 export const saveSettings = (settings: Settings) => call('saveSettings', {}, { settings })

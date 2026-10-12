@@ -5,13 +5,18 @@ import { ChartCard, Empty, Kpi, Section } from '../components/ui'
 import AgentTable, { Flag } from '../components/AgentTable'
 import { byWallet, compact, fmt, kpis } from '../lib/metrics'
 import { useData } from '../lib/store'
-import { GROUPS, GROUP_LABEL, Group } from '../lib/types'
+import { GATEWAY_GROUPS, GROUPS, GROUP_LABEL, Group } from '../lib/types'
 
 type Tab = 'ALL' | Group
 
 export default function GatewayPage({ currency, gateway }: { currency: string; gateway: string }) {
-  const { rows, loading, settings } = useData()
+  const { rows, loading, settings, updateSettings } = useData()
+  const groups = GATEWAY_GROUPS[gateway] ?? GROUPS
   const [tab, setTab] = useState<Tab>('ALL')
+  const gwKey = `${currency}-${gateway}`
+  const gwThreshold = settings.gatewayBalance?.[gwKey]?.high ?? 0
+  const [thDraft, setThDraft] = useState<string | null>(null)
+  const [thSaved, setThSaved] = useState(false)
   const [flag, setFlag] = useState<Flag>('all')
 
   const gwRows = useMemo(() => rows.filter(r => r.currency === currency && r.gateway === gateway), [rows, currency, gateway])
@@ -25,7 +30,14 @@ export default function GatewayPage({ currency, gateway }: { currency: string; g
     { name: 'High', value: k.high, color: '#f59e0b' },
     { name: 'Low', value: k.low, color: '#ef4444' },
   ]
-  const th = tab === 'ALL' ? null : settings.thresholds[tab]
+  const activeGroup: Group | null = tab === 'ALL' ? (groups.length === 1 ? groups[0] : null) : tab
+  const th = activeGroup ? settings.thresholds[activeGroup] : null
+  const gwTotal = useMemo(() => kpis(gwRows).rBal, [gwRows])
+  const gwOver = gwThreshold > 0 && gwTotal > gwThreshold
+  const saveThreshold = async () => {
+    await updateSettings({ ...settings, gatewayBalance: { ...settings.gatewayBalance, [gwKey]: { high: Math.max(0, Number(thDraft) || 0) } } })
+    setThDraft(null); setThSaved(true)
+  }
 
   if (!gwRows.length) return (
     <>
@@ -41,14 +53,14 @@ export default function GatewayPage({ currency, gateway }: { currency: string; g
     <>
       <PageTitle title={`${currency} · ${gateway}`} subtitle="Agent wallet monitoring — balances, activity, limits and discrepancies" />
 
-      <div className="flex flex-wrap gap-1 rounded-xl bg-slate-200/60 p-1">
-        {(['ALL', ...GROUPS] as Tab[]).map(t => (
+      {groups.length > 1 && <div className="flex flex-wrap gap-1 rounded-xl bg-slate-200/60 p-1">
+        {(['ALL', ...groups] as Tab[]).map(t => (
           <button key={t} onClick={() => { setTab(t); setFlag('all') }}
             className={`rounded-lg px-4 py-2 text-sm font-medium ${tab === t ? 'bg-white text-brand-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}>
             {t === 'ALL' ? 'All' : GROUP_LABEL[t]} <span className="ml-1 text-xs text-slate-400">{fmt(count(t))}</span>
           </button>
         ))}
-      </div>
+      </div>}
 
       <Section title="Alerts (click to filter the table)" right={th && <span className="text-xs text-slate-400">Low &lt; {fmt(th.low)} · High &gt; {fmt(th.high)} · Discrep. ≥ {fmt(th.discrep)} (Settings)</span>}>
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -61,14 +73,33 @@ export default function GatewayPage({ currency, gateway }: { currency: string; g
 
       <Section title="Balances & flow">
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 xl:grid-cols-8">
-          <Kpi label="Accounts" value={fmt(k.accounts)} sub={`${fmt(k.loggedIn)} logged in`} />
-          <Kpi label="Running balance" value={compact(k.rBal)} sub={fmt(k.rBal, 2)} tone="info" />
+          <Kpi label="Accounts" value={fmt(k.accounts)} sub={`${fmt(k.loggedIn)} ${gateway === 'MCG' ? 'active' : 'logged in'}`} />
+          <Kpi label="Running balance" value={compact(k.rBal)} sub={gwOver && tab === 'ALL' ? `HIGH · above ${compact(gwThreshold)}` : fmt(k.rBal, 2)} tone={gwOver && tab === 'ALL' ? 'warn' : 'info'} />
           <Kpi label="Actual balance" value={compact(k.aBal)} sub={fmt(k.aBal, 2)} tone="info" />
           <Kpi label="Net discrepancy" value={compact(k.discrep)} sub="R. Bal − A. Bal" tone={k.discrep === 0 ? 'good' : 'warn'} />
           <Kpi label="Deposit" value={compact(k.deposit)} sub={fmt(k.deposit)} tone="good" />
           <Kpi label="Withdrawal" value={compact(k.withdrawal)} sub={fmt(k.withdrawal)} />
           <Kpi label="Adjustment" value={compact(k.adjustment)} sub={fmt(k.adjustment)} />
           <Kpi label="Total flow" value={compact(k.flow)} sub="Deposit + Withdrawal" />
+        </div>
+      </Section>
+
+      <Section title={`${gateway} running-balance threshold`}>
+        <div className={`card flex flex-wrap items-center gap-4 p-4 ${gwOver ? 'border-amber-400 bg-amber-50' : ''}`}>
+          <div className="min-w-0 flex-1">
+            <div className="text-sm font-medium text-slate-700">Total {gateway} running balance: <span className="tabular-nums">{fmt(gwTotal, 2)}</span></div>
+            <div className="mt-0.5 text-sm">
+              {gwThreshold > 0
+                ? gwOver ? <span className="font-semibold text-amber-700">HIGH — above your threshold of {fmt(gwThreshold)} by {fmt(gwTotal - gwThreshold)}</span>
+                         : <span className="text-emerald-600">Within your threshold of {fmt(gwThreshold)} ({fmt((gwTotal / gwThreshold) * 100, 0)}% used)</span>
+                : <span className="text-slate-500">No threshold set. Enter the total running balance above which {gateway} should be flagged as high.</span>}
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <input type="number" inputMode="decimal" min={0} className="input w-44" placeholder="High above…" value={thDraft ?? (gwThreshold || '')} onChange={e => { setThDraft(e.target.value); setThSaved(false) }} />
+            <button className="btn-primary" disabled={thDraft === null} onClick={saveThreshold}>Save threshold</button>
+            {thSaved && thDraft === null && <span className="text-sm text-emerald-600">Saved</span>}
+          </div>
         </div>
       </Section>
 
@@ -109,8 +140,8 @@ export default function GatewayPage({ currency, gateway }: { currency: string; g
         </ChartCard>
       </div>
 
-      <Section title={`Accounts — ${tab === 'ALL' ? 'All types' : GROUP_LABEL[tab]}`}>
-        <AgentTable rows={scoped} showType={tab === 'ALL'} flag={flag} onFlag={setFlag} />
+      <Section title={`Accounts — ${tab === 'ALL' ? (groups.length > 1 ? 'All types' : GROUP_LABEL[groups[0]]) : GROUP_LABEL[tab]}`}>
+        <AgentTable rows={scoped} showType={tab === 'ALL' && groups.length > 1} flag={flag} onFlag={setFlag} gateway={gateway} />
       </Section>
     </>
   )

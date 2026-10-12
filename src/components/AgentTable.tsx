@@ -4,6 +4,8 @@ import { AgentRow, GROUP_LABEL } from '../lib/types'
 import { fmt } from '../lib/metrics'
 import { Badge, HealthBadge } from './ui'
 
+const stateTone = (s: string) => (s === 'Logged In' || s === 'Active' ? 'green' : s === 'Logged Out' || s === 'Disabled' ? 'slate' : 'red') as 'green' | 'slate' | 'red'
+
 export type Flag = 'all' | 'low' | 'high' | 'healthy' | 'discrep' | 'limit'
 const PAGE_SIZES = [25, 50, 100, 250]
 
@@ -11,7 +13,9 @@ type Col = { key: keyof AgentRow | 'flags'; label: string; num?: boolean; render
 
 const money = (n: number) => <span className={n < 0 ? 'text-rose-600' : ''}>{fmt(n, 2)}</span>
 
-export default function AgentTable({ rows, showType, flag, onFlag }: { rows: AgentRow[]; showType: boolean; flag: Flag; onFlag: (f: Flag) => void }) {
+export default function AgentTable({ rows, showType, flag, onFlag, gateway }: { rows: AgentRow[]; showType: boolean; flag: Flag; onFlag: (f: Flag) => void; gateway?: string }) {
+  const isMcg = gateway === 'MCG'
+  const secKey = isMcg ? 'code' : 'limitStatus'
   const [q, setQ] = useState('')
   const [wallet, setWallet] = useState('')
   const [login, setLogin] = useState('')
@@ -21,13 +25,14 @@ export default function AgentTable({ rows, showType, flag, onFlag }: { rows: Age
   const [size, setSize] = useState(50)
 
   const wallets = useMemo(() => [...new Set(rows.map(r => r.wallet))].sort(), [rows])
-  const limitStatuses = useMemo(() => [...new Set(rows.map(r => r.limitStatus))].filter(Boolean).sort(), [rows])
+  const limitStatuses = useMemo(() => [...new Set(rows.map(r => r[secKey] as string))].filter(Boolean).sort(), [rows, secKey])
+  const states = useMemo(() => [...new Set(rows.map(r => r.login))].filter(Boolean).sort(), [rows])
 
   const filtered = useMemo(() => {
     const s = q.trim().toLowerCase()
     const out = rows.filter(r =>
       (!s || r.account.toLowerCase().includes(s) || r.remarks.toLowerCase().includes(s) || r.tags.toLowerCase().includes(s)) &&
-      (!wallet || r.wallet === wallet) && (!login || r.login === login) && (!limitStatus || r.limitStatus === limitStatus) &&
+      (!wallet || r.wallet === wallet) && (!login || r.login === login) && (!limitStatus || r[secKey] === limitStatus) &&
       (flag === 'all' || (flag === 'low' && r.health === 'low') || (flag === 'high' && r.health === 'high') || (flag === 'healthy' && r.health === 'healthy') ||
         (flag === 'discrep' && r.highDiscrep) || (flag === 'limit' && r.limitExceeded)))
     const k = sort.key as keyof AgentRow
@@ -46,9 +51,10 @@ export default function AgentTable({ rows, showType, flag, onFlag }: { rows: Age
     { key: 'account', label: 'Account' },
     { key: 'group', label: 'Type', render: r => <Badge tone="purple">{GROUP_LABEL[r.group]}</Badge>, hideInGroup: true },
     { key: 'wallet', label: 'Wallet' },
-    { key: 'login', label: 'Status', render: r => <Badge tone={r.login === 'Logged In' ? 'green' : r.login === 'Logged Out' ? 'slate' : 'red'}>{r.login}</Badge> },
-    { key: 'actSdp', label: 'ACT SDP', num: true },
-    { key: 'mrcLmt', label: 'MRC LMT', num: true },
+    { key: 'login', label: 'Status', render: r => <Badge tone={stateTone(r.login)}>{r.login}</Badge> },
+    { key: 'code', label: 'Txn status', hideInGroup: false },
+    { key: 'actSdp', label: isMcg ? 'SDP' : 'ACT SDP', num: true },
+    { key: 'mrcLmt', label: isMcg ? 'MRC limit' : 'MRC LMT', num: true },
     { key: 'utilizedLimit', label: 'Utilized limit', num: true },
     { key: 'opening', label: 'Opening', num: true },
     { key: 'deposit', label: 'Deposit', num: true },
@@ -60,14 +66,14 @@ export default function AgentTable({ rows, showType, flag, onFlag }: { rows: Age
     { key: 'health', label: 'Balance', render: r => <HealthBadge h={r.health} /> },
     { key: 'flags', label: 'Alerts', render: r => <span className="flex gap-1">{r.highDiscrep && <Badge tone="red">Discrep.</Badge>}{r.limitExceeded && <Badge tone="amber">Limit exceeded</Badge>}</span> },
     { key: 'limitStatus', label: 'Limit status' },
-    { key: 'remarks', label: 'Remarks' },
+    { key: 'remarks', label: isMcg ? 'Status remark' : 'Remarks' },
   ]
-  const visible = cols.filter(c => showType || !c.hideInGroup)
+  const visible = cols.filter(c => (showType || !c.hideInGroup) && (isMcg ? c.key !== 'utilizedLimit' && c.key !== 'limitStatus' : c.key !== 'code'))
 
   const exportCsv = () => {
-    const head = ['Account', 'Type', 'Wallet', 'Status', 'ACT SDP', 'MRC LMT', 'Utilized limit', 'Opening', 'Deposit', 'Withdrawal', 'Adjustment', 'R.BAL', 'A.BAL', 'Discrep', 'Balance', 'High discrep', 'Limit exceeded', 'Limit status', 'Remarks']
+    const head = ['Account', 'Type', 'Wallet', 'Status', 'ACT SDP', 'MRC LMT', 'Utilized limit', 'Opening', 'Deposit', 'Withdrawal', 'Adjustment', 'R.BAL', 'A.BAL', 'Discrep', 'Balance', 'High discrep', 'Limit exceeded', 'Limit status / Txn status', 'Remarks']
     const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`
-    const lines = filtered.map(r => [r.account, r.group, r.wallet, r.login, r.actSdp, r.mrcLmt, r.utilizedLimit, r.opening, r.deposit, r.withdrawal, r.adjustment, r.rBal, r.aBal, r.discrep, r.health, r.highDiscrep, r.limitExceeded, r.limitStatus, r.remarks].map(esc).join(','))
+    const lines = filtered.map(r => [r.account, r.group, r.wallet, r.login, r.actSdp, r.mrcLmt, r.utilizedLimit, r.opening, r.deposit, r.withdrawal, r.adjustment, r.rBal, r.aBal, r.discrep, r.health, r.highDiscrep, r.limitExceeded, isMcg ? r.code : r.limitStatus, r.remarks].map(esc).join(','))
     const url = URL.createObjectURL(new Blob([[head.join(','), ...lines].join('\n')], { type: 'text/csv' }))
     const a = document.createElement('a'); a.href = url; a.download = 'agents.csv'; a.click(); URL.revokeObjectURL(url)
   }
@@ -83,8 +89,8 @@ export default function AgentTable({ rows, showType, flag, onFlag }: { rows: Age
       <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 p-3">
         <input className="input w-60" placeholder="Search account, tag, remark…" value={q} onChange={e => { setQ(e.target.value); setPage(0) }} />
         {sel(wallet, setWallet, 'All wallets', wallets)}
-        {sel(login, setLogin, 'All statuses', ['Logged In', 'Logged Out', 'Locked'])}
-        {sel(limitStatus, setLimitStatus, 'All limit statuses', limitStatuses)}
+        {sel(login, setLogin, 'All statuses', states)}
+        {sel(limitStatus, setLimitStatus, isMcg ? 'All txn statuses' : 'All limit statuses', limitStatuses)}
         <select className="input" value={flag} onChange={e => { onFlag(e.target.value as Flag); setPage(0) }}>
           <option value="all">All balances & alerts</option>
           <option value="high">Higher balance</option>

@@ -55,7 +55,7 @@ export default function Layout({ children }: { children: ReactNode }) {
           <Group icon={<Globe2 size={16} />} label="BDT" match="/currency/bdt" open>
             <NavLink to="/currency/bdt" end className={sub}>Overview</NavLink>
             <NavLink to="/currency/bdt/ssg" className={sub}>SSG</NavLink>
-            <NavLink to="/currency/bdt/mcg" className={sub}>MCG <span className="text-[10px] text-slate-500">soon</span></NavLink>
+            <NavLink to="/currency/bdt/mcg" className={sub}>MCG</NavLink>
             <NavLink to="/currency/bdt/local-bank" className={sub}>Local Bank <span className="text-[10px] text-slate-500">soon</span></NavLink>
           </Group>
           <Group icon={<Globe2 size={16} />} label="PKR" match="/currency/pkr">

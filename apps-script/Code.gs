@@ -15,10 +15,15 @@
  */
 
 var FOLDER_NAME = 'PaymentOpsMonitor';
-var DATA_SHEETS = ['BDT-SSG-AGENT', 'BDT-SSG-PERSONAL', 'BDT-SSG-VIP', 'BDT-SSG-WITHDRAWAL-ONLY', 'BDT-SSG-PERMANENT-STOP'];
+var DATA_SHEETS = ['BDT-SSG-AGENT', 'BDT-SSG-PERSONAL', 'BDT-SSG-VIP', 'BDT-SSG-WITHDRAWAL-ONLY', 'BDT-SSG-PERMANENT-STOP', 'BDT-MCG'];
 var ANALYTICS_SHEET = 'Analytics';
 var ANALYTICS_HEADER = ['DATE', 'CURRENCY', 'GATEWAY', 'DEPOSIT', 'WITHDRAWAL', 'NOTE'];
 var BACKUP_ROWS_PER_CHUNK = 1000;
+// Gateways whose daily deposit / withdrawal totals are recorded automatically (feeds the dashboard line chart).
+var DAILY_GATEWAYS = {
+  'SSG': { currency: 'BDT', sheets: ['BDT-SSG-AGENT', 'BDT-SSG-PERSONAL', 'BDT-SSG-VIP', 'BDT-SSG-WITHDRAWAL-ONLY', 'BDT-SSG-PERMANENT-STOP'] },
+  'MCG': { currency: 'BDT', sheets: ['BDT-MCG'] }
+};
 
 /* ------------------------------ entry points ------------------------------ */
 
@@ -46,6 +51,7 @@ function handle_(e, body) {
       case 'importChunk':  return json_(importChunk_(body));
       case 'importCommit': return json_(importCommit_(body));
       case 'saveAnalytics': return json_(saveAnalytics_(body));
+      case 'recordDaily':   return json_(recordDailyTotals_(false));
       case 'saveSettings':  writeJson_('settings.json', body.settings || {}); return json_({ ok: true });
       default: return json_({ error: 'Unknown action: ' + action });
     }
@@ -425,6 +431,11 @@ function saveAnalytics_(b) {
     }
     if (i >= 0) all[i] = en; else all.push(en);
   });
+  persistAnalytics_(all);
+  return { ok: true, count: all.length };
+}
+
+function persistAnalytics_(all) {
   all.sort(function (a, c) { return a.date < c.date ? -1 : a.date > c.date ? 1 : 0; });
   writeJson_('analytics.json', all);
   try {
@@ -435,7 +446,86 @@ function saveAnalytics_(b) {
       sh.getRange(2, 1, vals.length, ANALYTICS_HEADER.length).setValues(vals);
     }
   } catch (err) { /* sheet mirror is best-effort; Drive copy is saved */ }
-  return { ok: true, count: all.length };
+}
+
+/* --------------------- automatic end-of-day deposit / withdrawal totals --------------------- */
+
+function timezone_() { return props_().getProperty('TIMEZONE') || Session.getScriptTimeZone() || 'Asia/Dhaka'; }
+
+function numVal_(v) {
+  if (typeof v === 'number') return isFinite(v) ? v : 0;
+  var n = Number(String(v === null || v === undefined ? '' : v).replace(/[, ]/g, ''));
+  return isFinite(n) ? n : 0;
+}
+
+// Sum the DEPOSIT and WITHDRAWAL columns (matched by header name, any case) of one tab.
+function sumTab_(sh) {
+  var out = { deposit: 0, withdrawal: 0 };
+  var last = sh.getLastRow();
+  if (last < 2) return out;
+  var header = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].map(function (h) { return String(h).trim().toUpperCase(); });
+  var dCol = header.indexOf('DEPOSIT') + 1, wCol = header.indexOf('WITHDRAWAL') + 1;
+  if (dCol > 0) sh.getRange(2, dCol, last - 1, 1).getValues().forEach(function (r) { out.deposit += numVal_(r[0]); });
+  if (wCol > 0) sh.getRange(2, wCol, last - 1, 1).getValues().forEach(function (r) { out.withdrawal += numVal_(r[0]); });
+  return out;
+}
+
+/**
+ * Records today's total deposit and withdrawal for every gateway in DAILY_GATEWAYS.
+ * - Row key is date + currency + gateway; automatic rows carry the note "auto" and are refreshed on every run.
+ * - A row saved by hand (any other note) is never overwritten.
+ * - fromTrigger=true: a run just after midnight (00:00-00:59) belongs to the day that just ended.
+ */
+function recordDailyTotals_(fromTrigger) {
+  var lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    var tz = timezone_();
+    var when = new Date();
+    if (fromTrigger && Number(Utilities.formatDate(when, tz, 'H')) === 0) when = new Date(when.getTime() - 3600 * 1000);
+    var date = Utilities.formatDate(when, tz, 'yyyy-MM-dd');
+    var ss = spreadsheet_();
+    var all = readAnalytics_();
+    var recorded = [], skipped = [];
+    Object.keys(DAILY_GATEWAYS).forEach(function (gw) {
+      var cfg = DAILY_GATEWAYS[gw];
+      var dep = 0, wd = 0, found = 0;
+      cfg.sheets.forEach(function (name) {
+        var sh = ss.getSheetByName(name);
+        if (!sh) return;
+        found++;
+        var t = sumTab_(sh);
+        dep += t.deposit; wd += t.withdrawal;
+      });
+      if (!found) { skipped.push(gw + ' (no tabs found)'); return; }
+      var entry = { date: date, currency: cfg.currency, gateway: gw, deposit: Math.round(dep * 100) / 100, withdrawal: Math.round(wd * 100) / 100, note: 'auto' };
+      var i = -1;
+      for (var k = 0; k < all.length; k++) {
+        if (all[k].date === date && all[k].currency === cfg.currency && all[k].gateway === gw) { i = k; break; }
+      }
+      if (i >= 0 && all[i].note !== 'auto') { skipped.push(gw + ' (manual entry kept)'); return; }
+      if (i >= 0) all[i] = entry; else all.push(entry);
+      recorded.push(entry);
+    });
+    if (recorded.length) persistAnalytics_(all);
+    return { ok: true, date: date, recorded: recorded, skipped: skipped };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// Time-driven trigger target.
+function recordDailyTotals() {
+  try { recordDailyTotals_(true); } catch (err) { console.error('Daily totals failed: ' + err); }
+}
+
+/** Run once from the editor: installs the daily trigger (runs between 23:50 and 00:05 in the script time zone). */
+function setupDailyTrigger() {
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    if (t.getHandlerFunction() === 'recordDailyTotals') ScriptApp.deleteTrigger(t);
+  });
+  ScriptApp.newTrigger('recordDailyTotals').timeBased().atHour(23).nearMinute(50).everyDays(1).inTimezone(timezone_()).create();
+  Logger.log('Daily totals trigger installed (time zone: ' + timezone_() + ').');
 }
 
 function dateStr_(v) {

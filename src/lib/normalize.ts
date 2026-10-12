@@ -24,6 +24,37 @@ export function classify(row: Pick<AgentRow, 'rBal' | 'discrep' | 'deposit' | 'u
   }
 }
 
+const FIELD_ALIASES: Record<string, string[]> = {
+  account: ['ACCOUNTS', 'AGENT ID'],
+  actSdp: ['ACT SDP', 'SDP'],
+  mrcLmt: ['MRC LMT', 'MRC. LIMIT', 'MRC LIMIT'],
+  dpBalLimit: ['DP BAL LIMIT'],
+  opening: ['OPENING'],
+  deposit: ['DEPOSIT'],
+  withdrawal: ['WITHDRAWAL'],
+  adjustment: ['ADJUSTMENT'],
+  aBal: ['A. BAL', 'WALLET BALANCE'],
+  wallet: ['WALLET'],
+  status: ['STATUS'],
+  code: ['CODE'],
+  whrs: ['W. HRS'],
+  limitStatus: ['LIMIT STATUS'],
+  acctType: ['ACCT TYPE'],
+  tags: ['TAGS'],
+  remarks: ['REMARKS'],
+  txStatus: ['TRANSACTION STATUS'],
+  statusRemark: ['STATUS REMARK'],
+}
+
+/** MCG has no login state: derive it from Status (NORMAL/Suspended/...) and Transaction Status (Disabled/...). */
+function mcgState(status: string, tx: string) {
+  const s = status.toLowerCase()
+  if (s && s !== 'normal') return s.charAt(0).toUpperCase() + s.slice(1)
+  return tx.toLowerCase() === 'disabled' ? 'Disabled' : 'Active'
+}
+
+export const isActive = (r: Pick<AgentRow, 'login'>) => r.login === 'Logged In' || r.login === 'Active'
+
 export function normalize(ds: Dataset, settings: Settings): AgentRow[] {
   const out: AgentRow[] = []
   for (const sh of ds.sheets) {
@@ -31,43 +62,47 @@ export function normalize(ds: Dataset, settings: Settings): AgentRow[] {
     if (!meta) continue
     const idx: Record<string, number> = {}
     sh.header.forEach((h, i) => (idx[str(h).toUpperCase()] = i))
-    const g = (r: unknown[], k: string) => (idx[k] === undefined ? undefined : r[idx[k]])
+    const col: Record<string, number | undefined> = {}
+    for (const [f, names] of Object.entries(FIELD_ALIASES)) col[f] = names.map(n => idx[n]).find(i => i !== undefined)
+    const g = (r: unknown[], f: string) => (col[f] === undefined ? undefined : r[col[f] as number])
+    const isMcg = meta.gateway === 'MCG'
     const t = settings.thresholds[meta.group]
     for (const r of sh.rows) {
-      const account = str(g(r, 'ACCOUNTS'))
+      const account = str(g(r, 'account'))
       if (!account) continue
-      const opening = num(g(r, 'OPENING'))
-      const deposit = num(g(r, 'DEPOSIT'))
-      const withdrawal = num(g(r, 'WITHDRAWAL'))
-      const adjustment = num(g(r, 'ADJUSTMENT'))
-      const aBal = num(g(r, 'A. BAL'))
+      const opening = num(g(r, 'opening'))
+      const deposit = num(g(r, 'deposit'))
+      const withdrawal = num(g(r, 'withdrawal'))
+      const adjustment = num(g(r, 'adjustment'))
+      const aBal = num(g(r, 'aBal'))
       // Business formula (from the brief), recomputed instead of trusting the sheet value
       const rBal = round2(opening + deposit - withdrawal - adjustment)
       const discrep = round2(rBal - aBal)
-      const mrcLmt = num(g(r, 'MRC LMT'))
-      const dpBalLimit = num(g(r, 'DP Bal Limit'.toUpperCase()))
+      const mrcLmt = num(g(r, 'mrcLmt'))
+      const dpBalLimit = num(g(r, 'dpBalLimit'))
       const utilizedLimit = dpBalLimit > 0 ? dpBalLimit : mrcLmt
-      const status = str(g(r, 'STATUS'))
+      const status = str(g(r, 'status'))
+      const tx = str(g(r, 'txStatus'))
       const row: AgentRow = {
         id: `${sh.name}:${account}`,
         account,
         group: meta.group,
         currency: meta.currency,
         gateway: meta.gateway,
-        actSdp: num(g(r, 'ACT SDP')),
+        actSdp: num(g(r, 'actSdp')),
         mrcLmt,
         dpBalLimit,
         utilizedLimit,
         opening, deposit, withdrawal, adjustment, rBal, aBal, discrep,
         status,
-        login: loginState(status),
-        code: str(g(r, 'CODE')),
-        whrs: str(g(r, 'W. HRS')),
-        wallet: str(g(r, 'WALLET')).toUpperCase(),
-        limitStatus: str(g(r, 'LIMIT STATUS')),
-        acctType: str(g(r, 'ACCT TYPE')),
-        tags: str(g(r, 'TAGS')),
-        remarks: str(g(r, 'REMARKS')),
+        login: isMcg ? mcgState(status, tx) : loginState(status),
+        code: isMcg ? tx : str(g(r, 'code')),
+        whrs: str(g(r, 'whrs')),
+        wallet: str(g(r, 'wallet')).toUpperCase(),
+        limitStatus: isMcg ? status : str(g(r, 'limitStatus')),
+        acctType: isMcg ? 'MCG' : str(g(r, 'acctType')),
+        tags: str(g(r, 'tags')),
+        remarks: isMcg ? str(g(r, 'statusRemark')) : str(g(r, 'remarks')),
         health: 'healthy', highDiscrep: false, limitExceeded: false,
       }
       Object.assign(row, classify(row, t))
