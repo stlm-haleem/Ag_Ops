@@ -8,7 +8,7 @@ import { useData } from '../lib/store'
 import { GROUPS, GROUP_LABEL } from '../lib/types'
 
 export default function Executive() {
-  const { rows, analytics, loading } = useData()
+  const { rows, analytics, loading, settings } = useData()
   const [currency, setCurrency] = useState('')
   const [gateway, setGateway] = useState('')
   const [wallet, setWallet] = useState('')
@@ -17,7 +17,15 @@ export default function Executive() {
   const [to, setTo] = useState('')
 
   const wallets = useMemo(() => [...new Set(rows.map(r => r.wallet))].sort(), [rows])
+  const gateways = useMemo(() => [...new Set(rows.map(r => r.gateway))].sort(), [rows])
   const states = useMemo(() => [...new Set(rows.map(r => r.login))].filter(Boolean).sort(), [rows])
+  const gwCards = useMemo(() => gateways.map(g => {
+    const gr = rows.filter(r => r.gateway === g)
+    const cur = gr[0]?.currency ?? 'BDT'
+    const total = kpis(gr).rBal
+    const high = settings.gatewayBalance?.[`${cur}-${g}`]?.high ?? 0
+    return { gateway: g, currency: cur, total, high, over: high > 0 && total > high, agents: gr.length }
+  }), [gateways, rows, settings])
   const scoped = useMemo(() => rows.filter(r => (!currency || r.currency === currency) && (!gateway || r.gateway === gateway) && (!wallet || r.wallet === wallet) && (!login || r.login === login)), [rows, currency, gateway, wallet, login])
   const k = useMemo(() => kpis(scoped), [scoped])
   const bdt = useMemo(() => kpis(rows.filter(r => r.currency === 'BDT')), [rows])
@@ -66,6 +74,22 @@ export default function Executive() {
           <Kpi label="INR balance" value="—" sub="Not connected yet" />
         </div>
       </Section>
+
+      {gwCards.length > 0 && (
+        <Section title="Gateway running balance vs your threshold">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {gwCards.map(c => (
+              <Link key={c.gateway} to={`/currency/${c.currency.toLowerCase()}/${c.gateway.toLowerCase()}`} className={`card p-4 hover:border-brand-500 ${c.over ? 'border-amber-400 bg-amber-50' : ''}`}>
+                <div className="flex items-center justify-between"><div className="font-semibold">{c.currency} · {c.gateway}</div>
+                  {c.over ? <span className="rounded-full bg-amber-200 px-2 py-0.5 text-xs font-semibold text-amber-900">HIGH</span> : c.high > 0 ? <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700">OK</span> : <span className="text-xs text-slate-400">No threshold</span>}</div>
+                <div className="mt-1 text-xl font-semibold tabular-nums">{compact(c.total)}</div>
+                {c.high > 0 && <><div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-200"><div className={`h-full ${c.over ? 'bg-amber-500' : 'bg-emerald-500'}`} style={{ width: `${Math.min(100, Math.max(0, (c.total / c.high) * 100))}%` }} /></div>
+                  <div className="mt-1 text-xs text-slate-500">Threshold {compact(c.high)} · {fmt((c.total / c.high) * 100, 0)}%</div></>}
+              </Link>
+            ))}
+          </div>
+        </Section>
+      )}
 
       <Section title="Transaction flow (from current sheet snapshot)">
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
