@@ -21,14 +21,16 @@ export default function GatewayPage({ currency, gateway }: { currency: string; g
 
   const gwRows = useMemo(() => rows.filter(r => r.currency === currency && r.gateway === gateway), [rows, currency, gateway])
   const scoped = useMemo(() => (tab === 'ALL' ? gwRows : gwRows.filter(r => r.group === tab)), [gwRows, tab])
+  const visualRows = useMemo(() => gateway === 'SSG' ? scoped.filter(r => r.wallet.trim() !== '' && r.wallet.trim().toUpperCase() !== 'IBBL') : scoped, [scoped, gateway])
   const k = useMemo(() => kpis(scoped), [scoped])
-  const wallets = useMemo(() => byWallet(scoped), [scoped])
-  const top = useMemo(() => [...scoped].sort((a, b) => b.rBal - a.rBal).slice(0, 10), [scoped])
-  const top5W = useMemo(() => [...scoped].sort((a, b) => b.withdrawal - a.withdrawal).slice(0, 10), [scoped])
+  const visualK = useMemo(() => kpis(visualRows), [visualRows])
+  const wallets = useMemo(() => byWallet(visualRows), [visualRows])
+  const top = useMemo(() => [...visualRows].sort((a, b) => b.rBal - a.rBal).slice(0, 10), [visualRows])
+  const top5W = useMemo(() => [...visualRows].sort((a, b) => b.withdrawal - a.withdrawal).slice(0, 10), [visualRows])
   const pie = [
-    { name: 'Healthy', value: k.accounts - k.low - k.high, color: '#10b981' },
-    { name: 'High', value: k.high, color: '#f59e0b' },
-    { name: 'Low', value: k.low, color: '#ef4444' },
+    { name: 'Healthy', value: visualK.accounts - visualK.low - visualK.high, color: '#10b981' },
+    { name: 'High', value: visualK.high, color: '#f59e0b' },
+    { name: 'Low', value: visualK.low, color: '#ef4444' },
   ]
   const activeGroup: Group | null = tab === 'ALL' ? (groups.length === 1 ? groups[0] : null) : tab
   const th = activeGroup ? settings.thresholds[activeGroup] : null
@@ -62,13 +64,19 @@ export default function GatewayPage({ currency, gateway }: { currency: string; g
         ))}
       </div>}
 
-      <Section title="Alerts (click to filter the table)" right={th && <span className="text-xs text-slate-400">Low &lt; {fmt(th.low)} · High &gt; {fmt(th.high)} · Discrep. ≥ {fmt(th.discrep)} (Settings)</span>}>
+      <Section title="Alerts (click to filter the table)" right={th && <span className="text-xs text-slate-400">Low &lt; {fmt(th.low)} · High &gt; SDP (fallback {gateway === 'MCG' ? '50,000' : '100,000'}) · Discrep. ≥ {fmt(th.discrep)} (Settings)</span>}>
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-          <Kpi label="Higher balance agents" value={fmt(k.high)} tone="warn" sub="R. Bal above high threshold" onClick={() => pick('high')} active={flag === 'high'} />
+          <Kpi label="Higher balance agents" value={fmt(k.high)} tone="warn" sub={`R. Bal above SDP (fallback ${gateway === 'MCG' ? '50,000' : '100,000'})`} onClick={() => pick('high')} active={flag === 'high'} />
           <Kpi label="Low balance agents" value={fmt(k.low)} tone="bad" sub="R. Bal below low threshold (incl. negative)" onClick={() => pick('low')} active={flag === 'low'} />
           <Kpi label="High discrepancy agents" value={fmt(k.highDiscrep)} tone="bad" sub="|R. Bal − A. Bal| above threshold" onClick={() => pick('discrep')} active={flag === 'discrep'} />
           <Kpi label="Limit exceeded" value={fmt(k.limitExceeded)} tone="warn" sub="Deposit > utilized limit" onClick={() => pick('limit')} active={flag === 'limit'} />
         </div>
+      </Section>
+
+      <Section title="Running balance by wallet" right={gateway === 'SSG' ? <span className="text-xs text-slate-400">IBBL and blank wallets excluded from wallet cards and charts</span> : undefined}>
+        {wallets.length
+          ? <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">{wallets.map(w => <Kpi key={w.wallet} label={w.wallet} value={compact(w.rBal)} sub={`${fmt(w.accounts)} accounts · ${fmt(w.rBal, 2)}`} tone="info" />)}</div>
+          : <div className="card p-4 text-sm text-slate-400">No wallet balances to display.</div>}
       </Section>
 
       <Section title="Balances & flow">

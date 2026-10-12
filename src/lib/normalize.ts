@@ -16,9 +16,15 @@ export function loginState(status: string) {
   return 'Locked' as const
 }
 
-export function classify(row: Pick<AgentRow, 'rBal' | 'discrep' | 'deposit' | 'utilizedLimit'>, t: Threshold) {
+export function higherBalanceThreshold(row: Pick<AgentRow, 'actSdp' | 'gateway'>) {
+  if (row.actSdp > 0) return row.actSdp
+  return row.gateway === 'MCG' ? 50000 : 100000
+}
+
+export function classify(row: Pick<AgentRow, 'rBal' | 'discrep' | 'deposit' | 'utilizedLimit' | 'actSdp' | 'gateway'>, t: Threshold) {
+  const highThreshold = higherBalanceThreshold(row)
   return {
-    health: row.rBal < t.low ? ('low' as const) : row.rBal > t.high ? ('high' as const) : ('healthy' as const),
+    health: row.rBal < t.low ? ('low' as const) : row.rBal > highThreshold ? ('high' as const) : ('healthy' as const),
     highDiscrep: Math.abs(row.discrep) >= t.discrep,
     limitExceeded: row.deposit > row.utilizedLimit,
   }
