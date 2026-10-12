@@ -17,7 +17,7 @@ const PKR_STATUSES = [
 ]
 
 export default function GatewayPage({ currency, gateway }: { currency: string; gateway: string }) {
-  const { rows, loading, settings } = useData()
+  const { rows, loading, settings, dataset } = useData()
   const isPkr = currency === 'PKR'
   const groups = GATEWAY_GROUPS[`${currency}-${gateway}`] ?? GROUPS
   const [tab, setTab] = useState<Tab>('ALL')
@@ -27,6 +27,7 @@ export default function GatewayPage({ currency, gateway }: { currency: string; g
   const [hiddenStates, setHiddenStates] = useState<Set<string>>(() => new Set(['Locked']))
   const toggleState = (v: string) => setHiddenStates(prev => { const n = new Set(prev); if (n.has(v)) n.delete(v); else n.add(v); return n })
 
+  const tabInfo = dataset?.sheets.find(sh => sh.name === `${currency}-${gateway}`)
   const gwRows = useMemo(() => rows.filter(r => r.currency === currency && r.gateway === gateway), [rows, currency, gateway])
   const loginStatuses = useMemo(() => [...new Set(gwRows.map(r => r.login))].sort(), [gwRows])
   const statusRows = useMemo(() => isPkr
@@ -49,7 +50,11 @@ export default function GatewayPage({ currency, gateway }: { currency: string; g
   if (!gwRows.length) return (
     <>
       <PageTitle title={`${currency} · ${gateway}`} />
-      <div className="card p-10 text-center text-slate-500">{loading ? 'Loading data…' : 'No data yet. Go to Admin → Data Sources to import your Excel file or connect the Google Sheet.'}</div>
+      <div className="card p-10 text-center text-slate-500">{loading ? 'Loading data…' : 'No data yet. Go to Admin → Data Sources to import your Excel file or connect the Google Sheet.'}
+        {!loading && tabInfo && <div className="mx-auto mt-4 max-w-3xl rounded-lg bg-amber-50 p-3 text-left text-xs text-amber-800">
+          The <b>{tabInfo.name}</b> tab was loaded ({fmt(tabInfo.rows.length)} rows) but no accounts were recognised. Header found: <span className="break-words font-mono">{tabInfo.header.map(h => String(h)).join(' | ') || '(empty)'}</span>
+          <div className="mt-1">First data row: <span className="break-words font-mono">{(tabInfo.rows.find(r => Array.isArray(r)) ?? []).slice(0, 8).map(c => String(c)).join(' | ')}</span></div>
+        </div>}</div>
     </>
   )
 

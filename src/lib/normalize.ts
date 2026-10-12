@@ -82,15 +82,25 @@ export function normalize(ds: Dataset, settings: Settings): AgentRow[] {
   for (const sh of ds.sheets) {
     const meta = SHEET_GROUP[sh.name]
     if (!meta) continue
+    // The header should be row 1, but a synced tab can carry a title/blank row above it:
+    // if there is no account column, look for the real header row in the first few rows.
+    const hasAccountCol = (h: unknown) => Array.isArray(h) && h.some(c => ['ACCOUNTS', 'AGENT ID'].includes(str(c).toUpperCase()))
+    let header: unknown[] = sh.header
+    let body: unknown[][] = sh.rows
+    if (!hasAccountCol(header)) {
+      const at = body.slice(0, 10).findIndex(hasAccountCol)
+      if (at >= 0) { header = body[at]; body = body.slice(at + 1) }
+    }
     const idx: Record<string, number> = {}
-    sh.header.forEach((h, i) => (idx[str(h).toUpperCase()] = i))
+    header.forEach((h, i) => (idx[str(h).toUpperCase()] = i))
     const col: Record<string, number | undefined> = {}
     for (const [f, names] of Object.entries(FIELD_ALIASES)) col[f] = names.map(n => idx[n]).find(i => i !== undefined)
     const g = (r: unknown[], f: string) => (col[f] === undefined ? undefined : r[col[f] as number])
     const isMcg = meta.gateway === 'MCG'
     const isPkr = meta.currency === 'PKR'
     const t = settings.thresholds[meta.group]
-    for (const r of sh.rows) {
+    for (const r of body) {
+      if (!Array.isArray(r)) continue
       const account = str(g(r, 'account'))
       if (!account) continue
       const opening = num(g(r, 'opening'))

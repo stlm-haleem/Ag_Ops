@@ -18,6 +18,13 @@ var FOLDER_NAME = 'PaymentOpsMonitor';
 var DATA_SHEETS = ['BDT-SSG-AGENT', 'BDT-SSG-PERSONAL', 'BDT-SSG-VIP', 'BDT-SSG-WITHDRAWAL-ONLY', 'BDT-SSG-PERMANENT-STOP', 'BDT-MCG', 'PKR-SSG'];
 // Tabs filled by a script sync (not by Excel import). A full-workbook import must never clear them.
 var SYNCED_SHEETS = ['PKR-SSG'];
+
+// PKR-SSG is synced into the spreadsheet in ACCTLIST_DESTINATION_SPREADSHEET_ID (defined further down), which can be a
+// different file from the one in SHEET_ID that holds the BDT tabs. Read every tab from the spreadsheet it really lives in.
+function spreadsheetFor_(name) {
+  if (SYNCED_SHEETS.indexOf(name) >= 0) return SpreadsheetApp.openById(ACCTLIST_DESTINATION_SPREADSHEET_ID);
+  return spreadsheet_();
+}
 var ANALYTICS_SHEET = 'Analytics';
 var ANALYTICS_HEADER = ['DATE', 'CURRENCY', 'GATEWAY', 'DEPOSIT', 'WITHDRAWAL', 'NOTE'];
 var BACKUP_ROWS_PER_CHUNK = 1000;
@@ -101,7 +108,7 @@ function liveManifest_() {
   var ss = spreadsheet_();
   var sheets = [];
   DATA_SHEETS.forEach(function (name) {
-    var sh = ss.getSheetByName(name);
+    var sh = spreadsheetFor_(name).getSheetByName(name);
     if (!sh) return;
     var last = sh.getLastRow();
     if (last < 2) return;
@@ -140,7 +147,7 @@ function rows_(sheetName, offset, limit) {
   var useLive = mode_() === 'auto';
   if (useLive) {
     try {
-      var sh = spreadsheet_().getSheetByName(sheetName);
+      var sh = spreadsheetFor_(sheetName).getSheetByName(sheetName);
       if (sh && sh.getLastRow() >= 2) {
         var total = sh.getLastRow() - 1;
         var n = Math.max(0, Math.min(limit, total - offset));
@@ -206,7 +213,7 @@ function backupIfStale_(live) {
     var backupId = String(live.revision).replace(/[^A-Za-z0-9]/g, '').slice(-18) + '_' + Date.now();
     var newSheets = [];
     live.sheets.forEach(function (s) {
-      var sh = ss.getSheetByName(s.name);
+      var sh = spreadsheetFor_(s.name).getSheetByName(s.name);
       if (!sh || sh.getLastRow() < 2) return;
       var chunks = [];
       var rowCount = sh.getLastRow() - 1;
@@ -498,7 +505,7 @@ function recordDailyTotals_(fromTrigger) {
       var label = key;
       var dep = 0, wd = 0, found = 0;
       cfg.sheets.forEach(function (name) {
-        var sh = ss.getSheetByName(name);
+        var sh = spreadsheetFor_(name).getSheetByName(name);
         if (!sh) return;
         found++;
         var t = sumTab_(sh);
