@@ -9,11 +9,11 @@ import { GATEWAY_GROUPS, GROUPS, GROUP_LABEL, Group } from '../lib/types'
 
 type Tab = 'ALL' | Group
 
-/** PKR-SSG login-status filter: checkbox per status, with the sheet's emoji legend. */
+/** PKR-SSG login-status filter: one checkbox per status. */
 const PKR_STATUSES = [
-  { value: 'Logged In', icon: '✅', label: 'Login: Yes' },
-  { value: 'Logged Out', icon: '⭕', label: 'Login: No' },
-  { value: 'Locked', icon: '🔒', label: 'Locked account' },
+  { value: 'Logged In', label: 'Login: Yes' },
+  { value: 'Logged Out', label: 'Login: No' },
+  { value: 'Locked', label: 'Locked account' },
 ]
 
 export default function GatewayPage({ currency, gateway }: { currency: string; gateway: string }) {
@@ -85,7 +85,7 @@ export default function GatewayPage({ currency, gateway }: { currency: string; g
           return (
             <label key={st.value} className="flex cursor-pointer items-center gap-2 text-sm text-slate-700">
               <input type="checkbox" className="h-4 w-4 accent-brand-600" checked={!hiddenStates.has(st.value)} onChange={() => toggleState(st.value)} />
-              <span>{st.icon} {st.label}</span><span className="text-xs text-slate-400">{fmt(n)}</span>
+              <span>{st.label}</span><span className="text-xs text-slate-400">{fmt(n)}</span>
             </label>
           )
         })}

@@ -3,9 +3,7 @@ import { ArrowDown, ArrowUp, Download } from 'lucide-react'
 import { AgentRow, GROUP_LABEL } from '../lib/types'
 import { fmt } from '../lib/metrics'
 import { Badge, HealthBadge } from './ui'
-import { BKK_STATUS_LABEL } from '../lib/normalize'
 
-const STATE_ICON: Record<string, string> = { 'Logged In': '✅', 'Logged Out': '⭕', Locked: '🔒' }
 const stateTone = (s: string) => (s === 'Logged In' || s === 'Active' ? 'green' : s === 'Logged Out' || s === 'Disabled' ? 'slate' : 'red') as 'green' | 'slate' | 'red'
 
 export type Flag = 'all' | 'low' | 'high' | 'healthy' | 'discrep' | 'limit'
@@ -13,9 +11,9 @@ const PAGE_SIZES = [25, 50, 100, 250]
 
 type Col = { key: keyof AgentRow | 'flags'; label: string; num?: boolean; render?: (r: AgentRow) => React.ReactNode; hideInGroup?: boolean; group?: string }
 
-/** PKR-BKK wallet status cell: sheet icon (✅ Enable, ⭕ Disable, ❌ Inactive). */
-const ICON_OF: Record<string, string> = Object.fromEntries(Object.entries(BKK_STATUS_LABEL).map(([icon, label]) => [label, icon]))
-const statusCell = (v: string) => <span title={v || 'No status'} className="text-base leading-none">{ICON_OF[v] ?? '—'}</span>
+/** PKR-BKK wallet status cell: the status as text (Enable / Disable / Inactive). */
+const walletTone = (v: string) => (v === 'Enable' ? 'green' : v === 'Disable' ? 'amber' : 'slate') as 'green' | 'amber' | 'slate'
+const statusCell = (v: string) => v ? <Badge tone={walletTone(v)}>{v}</Badge> : <span className="text-slate-400">—</span>
 
 const money = (n: number) => <span className={n < 0 ? 'text-rose-600' : ''}>{fmt(n, 2)}</span>
 
@@ -61,7 +59,7 @@ export default function AgentTable({ rows, showType, flag, onFlag, gateway, curr
     { key: 'account', label: 'Account' },
     { key: 'group', label: 'Type', render: r => <Badge tone="purple">{GROUP_LABEL[r.group]}</Badge>, hideInGroup: true },
     { key: 'wallet', label: 'Wallet' },
-    { key: 'login', label: 'Status', render: r => <Badge tone={stateTone(r.login)}>{isPkr ? `${STATE_ICON[r.login] ?? ''} ` : ''}{r.login}</Badge> },
+    { key: 'login', label: 'Status', render: r => <Badge tone={stateTone(r.login)}>{r.login}</Badge> },
     { key: 'code', label: isPkr ? 'Group code' : 'Txn status', hideInGroup: false },
     { key: 'whrs', label: 'Working hrs' },
     { key: 'actSdp', label: isMcg ? 'SDP' : 'ACT SDP', num: true },
