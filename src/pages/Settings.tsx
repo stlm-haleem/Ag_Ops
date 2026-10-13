@@ -7,7 +7,7 @@ export default function SettingsPage() {
   const { settings, updateSettings } = useData()
   const [draft, setDraft] = useState<Settings>(structuredClone(settings))
   const [saved, setSaved] = useState(false)
-  const set = (g: (typeof GROUPS)[number], k: 'low' | 'discrep', v: string) => { setSaved(false); setDraft(d => ({ ...d, thresholds: { ...d.thresholds, [g]: { ...d.thresholds[g], [k]: Number(v) || 0 } } })) }
+  const set = (g: (typeof GROUPS)[number], k: 'low' | 'discrep' | 'high', v: string) => { setSaved(false); setDraft(d => ({ ...d, thresholds: { ...d.thresholds, [g]: { ...d.thresholds[g], [k]: Number(v) || 0 } } })) }
   const setGw = (key: string, v: string) => { setSaved(false); setDraft(d => ({ ...d, gatewayBalance: { ...d.gatewayBalance, [key]: { high: Math.max(0, Number(v) || 0) } } })) }
 
   return (
@@ -15,11 +15,13 @@ export default function SettingsPage() {
       <PageTitle title="System Settings" subtitle="Balance and discrepancy thresholds apply instantly across dashboards." />
       <div className="card overflow-auto">
         <table className="w-full text-sm">
-          <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500"><tr><th className="px-4 py-2">Agent type</th><th className="px-4 py-2">Low balance if R. Bal &lt;</th><th className="px-4 py-2">High discrepancy if |R−A| ≥</th></tr></thead>
+          <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500"><tr><th className="px-4 py-2">Agent type</th><th className="px-4 py-2">Low balance if R. Bal &lt;</th><th className="px-4 py-2">High discrepancy if |R−A| ≥</th><th className="px-4 py-2">Higher balance if R. Bal &gt; (PKR BKK, when no SDP)</th></tr></thead>
           <tbody className="divide-y divide-slate-100">
             {GROUPS.map(g => (
-              <tr key={g}><td className="px-4 py-3 font-medium">{GROUP_LABEL[g]}</td>
-                {(['low', 'discrep'] as const).map(k => <td key={k} className="px-4 py-3"><input type="number" className="input w-40" value={draft.thresholds[g][k]} onChange={e => set(g, k, e.target.value)} /></td>)}
+              <tr key={g}><td className="px-4 py-3 font-medium">{g.startsWith('BKK_') ? `PKR BKK · ${GROUP_LABEL[g]}` : GROUP_LABEL[g]}</td>
+                <td className="px-4 py-3"><input type="number" className="input w-40" value={draft.thresholds[g].low} onChange={e => set(g, 'low', e.target.value)} /></td>
+                <td className="px-4 py-3">{g.startsWith('BKK_') ? <span className="text-slate-400">n/a (no actual balance)</span> : <input type="number" className="input w-40" value={draft.thresholds[g].discrep} onChange={e => set(g, 'discrep', e.target.value)} />}</td>
+                <td className="px-4 py-3">{g.startsWith('BKK_') ? <input type="number" className="input w-40" value={draft.thresholds[g].high} onChange={e => set(g, 'high', e.target.value)} /> : <span className="text-slate-400">—</span>}</td>
               </tr>
             ))}
           </tbody>
@@ -42,6 +44,7 @@ export default function SettingsPage() {
         <div><b>Running balance</b> = Opening + Deposit − Withdrawal − Adjustment. <b>Discrepancy</b> = Running − Actual.</div>
         <div><b>MCG</b> has no DP Bal Limit, so its utilized limit is <i>MRC. Limit</i>. Its Wallet Balance is used as the actual balance, and Active / Disabled / Suspended is derived from Status and Transaction Status.</div>
         <div><b>PKR SSG</b> status uses the sheet's icons: ✅ login yes (Logged In), ⭕ login no (Logged Out), 🔒 Locked. Its running balance uses the same formula as BDT SSG, and its utilized limit is DP AVAILABLE LIMIT.</div>
+        <div><b>PKR BKK</b> (BAJI, JEETBUZZ, SIX6S) has no actual balance, so there is no discrepancy. Running balance = Opening + Total deposit − Withdrawal − STLM/SPC − Top up. Higher balance = running balance above the account's SDP; with no SDP, the brand's own “Higher balance” threshold above is used. Limit exceeded comes from the sheet's EXCEED column.</div>
         <div>All accounts are counted in the KPIs (logged in, logged out and locked). Critical is intentionally not flagged yet.</div>
       </div>
       <div className="flex items-center gap-3">

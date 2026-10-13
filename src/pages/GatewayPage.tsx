@@ -3,7 +3,7 @@ import { Bar, BarChart, CartesianGrid, Cell, Legend, Pie, PieChart, ResponsiveCo
 import { PageTitle } from '../components/Layout'
 import { ChartCard, Empty, Kpi, Section } from '../components/ui'
 import AgentTable, { Flag } from '../components/AgentTable'
-import { byWallet, compact, fmt, kpis } from '../lib/metrics'
+import { byBkkWallet, byShop, byWallet, compact, fmt, kpis } from '../lib/metrics'
 import { useData } from '../lib/store'
 import { GATEWAY_GROUPS, GROUPS, GROUP_LABEL, Group } from '../lib/types'
 
@@ -18,7 +18,8 @@ const PKR_STATUSES = [
 
 export default function GatewayPage({ currency, gateway }: { currency: string; gateway: string }) {
   const { rows, loading, settings, dataset } = useData()
-  const isPkr = currency === 'PKR'
+  const isPkr = currency === 'PKR' && gateway === 'SSG'
+  const isBkk = gateway === 'BKK'
   const groups = GATEWAY_GROUPS[`${currency}-${gateway}`] ?? GROUPS
   const [tab, setTab] = useState<Tab>('ALL')
   const [flag, setFlag] = useState<Flag>('all')
@@ -38,6 +39,9 @@ export default function GatewayPage({ currency, gateway }: { currency: string; g
   const k = useMemo(() => kpis(scoped), [scoped])
   const visualK = useMemo(() => kpis(visualRows), [visualRows])
   const wallets = useMemo(() => byWallet(visualRows), [visualRows])
+  const bkkWallets = useMemo(() => byBkkWallet(scoped), [scoped])
+  const shops = useMemo(() => byShop(scoped).slice(0, 12), [scoped])
+  const bkkSum = useMemo(() => ({ stlm: scoped.reduce((s, r) => s + r.stlm, 0), topUp: scoped.reduce((s, r) => s + r.topUp, 0) }), [scoped])
   const top = useMemo(() => [...visualRows].sort((a, b) => b.rBal - a.rBal).slice(0, 10), [visualRows])
   const top5W = useMemo(() => [...visualRows].sort((a, b) => b.withdrawal - a.withdrawal).slice(0, 10), [visualRows])
   const pie = [
@@ -63,7 +67,7 @@ export default function GatewayPage({ currency, gateway }: { currency: string; g
 
   return (
     <>
-      <PageTitle title={`${currency} · ${gateway}`} subtitle="Agent wallet monitoring — balances, activity, limits and discrepancies" />
+      <PageTitle title={`${currency} · ${gateway}`} subtitle={isBkk ? 'Shop agents by brand — balances, deposits, withdrawals and wallet status' : 'Agent wallet monitoring — balances, activity, limits and discrepancies'} />
 
       {groups.length > 1 && <div className="flex flex-wrap gap-1 rounded-xl bg-slate-200/60 p-1">
         {(['ALL', ...groups] as Tab[]).map(t => (
@@ -95,22 +99,34 @@ export default function GatewayPage({ currency, gateway }: { currency: string; g
         </select>
       </div>}
 
-      <Section title="Alerts (click to filter the table)" right={th && <span className="text-xs text-slate-400">Low &lt; {fmt(th.low)} · High &gt; SDP ({isPkr ? 'no SDP = locked account' : `fallback ${gateway === 'MCG' ? '50,000' : '100,000'}`}) · Discrep. ≥ {fmt(th.discrep)} (Settings)</span>}>
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-          <Kpi label="Higher balance agents" value={fmt(k.high)} tone="warn" sub={isPkr ? 'R. Bal above SDP' : `R. Bal above SDP (fallback ${gateway === 'MCG' ? '50,000' : '100,000'})`} onClick={() => pick('high')} active={flag === 'high'} />
+      <Section title="Alerts (click to filter the table)" right={th && <span className="text-xs text-slate-400">Low &lt; {fmt(th.low)} · High &gt; SDP ({isBkk ? `no SDP: ${fmt(th.high)}` : isPkr ? 'no SDP = locked account' : `fallback ${gateway === 'MCG' ? '50,000' : '100,000'}`}){isBkk ? '' : ` · Discrep. ≥ ${fmt(th.discrep)}`} (Settings)</span>}>
+        <div className={`grid grid-cols-2 gap-3 ${isBkk ? 'lg:grid-cols-3' : 'lg:grid-cols-4'}`}>
+          <Kpi label="Higher balance agents" value={fmt(k.high)} tone="warn" sub={isBkk ? 'R. Bal above SDP (no SDP: Settings threshold)' : isPkr ? 'R. Bal above SDP' : `R. Bal above SDP (fallback ${gateway === 'MCG' ? '50,000' : '100,000'})`} onClick={() => pick('high')} active={flag === 'high'} />
           <Kpi label="Low balance agents" value={fmt(k.low)} tone="bad" sub="R. Bal below low threshold (incl. negative)" onClick={() => pick('low')} active={flag === 'low'} />
-          <Kpi label="High discrepancy agents" value={fmt(k.highDiscrep)} tone="bad" sub="|R. Bal − A. Bal| above threshold" onClick={() => pick('discrep')} active={flag === 'discrep'} />
-          <Kpi label="Limit exceeded" value={fmt(k.limitExceeded)} tone="warn" sub="Deposit > utilized limit" onClick={() => pick('limit')} active={flag === 'limit'} />
+          {!isBkk && <Kpi label="High discrepancy agents" value={fmt(k.highDiscrep)} tone="bad" sub="|R. Bal − A. Bal| above threshold" onClick={() => pick('discrep')} active={flag === 'discrep'} />}
+          <Kpi label={isBkk ? 'Exceed' : 'Limit exceeded'} value={fmt(k.limitExceeded)} tone="warn" sub={isBkk ? 'Sheet EXCEED status' : 'Deposit > utilized limit'} onClick={() => pick('limit')} active={flag === 'limit'} />
         </div>
       </Section>
 
-      <Section title="Running balance by wallet" right={gateway === 'SSG' ? <span className="text-xs text-slate-400">IBBL and blank wallets excluded from wallet cards and charts</span> : undefined}>
+      {isBkk ? <Section title="Wallets — deposit & withdrawal">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">{bkkWallets.map(w => <Kpi key={w.wallet} label={w.wallet} value={compact(w.deposit)} sub={`Deposit · Withdrawal ${fmt(w.withdrawal)} · ${fmt(w.depEnabled)} dep / ${fmt(w.wdEnabled)} wd enabled`} tone="info" />)}</div>
+      </Section> : <Section title="Running balance by wallet" right={gateway === 'SSG' ? <span className="text-xs text-slate-400">IBBL and blank wallets excluded from wallet cards and charts</span> : undefined}>
         {wallets.length
           ? <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">{wallets.map(w => <Kpi key={w.wallet} label={w.wallet} value={compact(w.rBal)} sub={`${fmt(w.accounts)} accounts · ${fmt(w.rBal, 2)}`} tone="info" />)}</div>
           : <div className="card p-4 text-sm text-slate-400">No wallet balances to display.</div>}
-      </Section>
+      </Section>}
 
-      <Section title="Balances & flow">
+      {isBkk ? <Section title="Balances & flow">
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 xl:grid-cols-7">
+          <Kpi label="Accounts" value={fmt(k.accounts)} sub={`${fmt(k.loggedIn)} active`} />
+          <Kpi label="Running balance" value={compact(k.rBal)} sub={fmt(k.rBal, 2)} tone="info" />
+          <Kpi label="Deposit" value={compact(k.deposit)} sub={fmt(k.deposit)} tone="good" />
+          <Kpi label="Withdrawal" value={compact(k.withdrawal)} sub={fmt(k.withdrawal)} />
+          <Kpi label="STLM/SPC" value={compact(bkkSum.stlm)} sub={fmt(bkkSum.stlm)} />
+          <Kpi label="Top up" value={compact(bkkSum.topUp)} sub={fmt(bkkSum.topUp)} />
+          <Kpi label="Total flow" value={compact(k.flow)} sub="Deposit + Withdrawal" />
+        </div>
+      </Section> : <Section title="Balances & flow">
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 xl:grid-cols-8">
           <Kpi label="Accounts" value={fmt(k.accounts)} sub={`${fmt(k.loggedIn)} ${gateway === 'MCG' ? 'active' : 'logged in'}`} />
           <Kpi label="Running balance" value={compact(k.rBal)} sub={fmt(k.rBal, 2)} tone="info" />
@@ -121,14 +137,19 @@ export default function GatewayPage({ currency, gateway }: { currency: string; g
           <Kpi label="Adjustment" value={compact(k.adjustment)} sub={fmt(k.adjustment)} />
           <Kpi label="Total flow" value={compact(k.flow)} sub="Deposit + Withdrawal" />
         </div>
-      </Section>
+      </Section>}
 
       <div className="grid gap-4 lg:grid-cols-3">
         <div className="lg:col-span-2">
+          {isBkk ? <ChartCard title="Running balance by shop (top 12)">
+            <ResponsiveContainer><BarChart data={shops}><CartesianGrid strokeDasharray="3 3" vertical={false} /><XAxis dataKey="shop" fontSize={11} /><YAxis tickFormatter={compact} /><Tooltip formatter={(v: number) => fmt(v, 2)} />
+              <Bar dataKey="rBal" name="Running" fill="#6366f1" radius={[4, 4, 0, 0]} /></BarChart></ResponsiveContainer>
+          </ChartCard> : (
           <ChartCard title="Running vs actual balance by wallet">
             <ResponsiveContainer><BarChart data={wallets}><CartesianGrid strokeDasharray="3 3" vertical={false} /><XAxis dataKey="wallet" /><YAxis tickFormatter={compact} /><Tooltip formatter={(v: number) => fmt(v, 2)} /><Legend />
               <Bar dataKey="rBal" name="Running" fill="#6366f1" radius={[4, 4, 0, 0]} /><Bar dataKey="aBal" name="Actual" fill="#94a3b8" radius={[4, 4, 0, 0]} /></BarChart></ResponsiveContainer>
           </ChartCard>
+          )}
         </div>
         <ChartCard title="Balance health (accounts)">
           {k.accounts ? <ResponsiveContainer><PieChart><Pie data={pie} dataKey="value" nameKey="name" innerRadius={55} outerRadius={90} paddingAngle={2}>{pie.map(p => <Cell key={p.name} fill={p.color} />)}</Pie><Tooltip /><Legend /></PieChart></ResponsiveContainer> : <Empty>No data</Empty>}
@@ -137,9 +158,18 @@ export default function GatewayPage({ currency, gateway }: { currency: string; g
 
       <div className="grid gap-4 lg:grid-cols-2">
         <ChartCard title="Deposit vs withdrawal per wallet">
-          <ResponsiveContainer><BarChart data={wallets}><CartesianGrid strokeDasharray="3 3" vertical={false} /><XAxis dataKey="wallet" /><YAxis tickFormatter={compact} /><Tooltip formatter={(v: number) => fmt(v, 2)} /><Legend />
+          <ResponsiveContainer><BarChart data={isBkk ? bkkWallets : wallets}><CartesianGrid strokeDasharray="3 3" vertical={false} /><XAxis dataKey="wallet" /><YAxis tickFormatter={compact} /><Tooltip formatter={(v: number) => fmt(v, 2)} /><Legend />
             <Bar dataKey="deposit" name="Deposit" fill="#10b981" radius={[4, 4, 0, 0]} /><Bar dataKey="withdrawal" name="Withdrawal" fill="#f43f5e" radius={[4, 4, 0, 0]} /></BarChart></ResponsiveContainer>
         </ChartCard>
+        {isBkk ? <div className="card overflow-auto">
+          <div className="p-4 text-sm font-semibold text-slate-700">Wallet summary</div>
+          <table className="w-full text-sm">
+            <thead className="bg-slate-50 text-xs uppercase text-slate-500"><tr>{['Wallet', 'Deposit', 'Withdrawal', 'Deposit enabled', 'Withdrawal enabled'].map((h, i) => <th key={h} className={`px-3 py-2 ${i ? 'text-right' : 'text-left'}`}>{h}</th>)}</tr></thead>
+            <tbody className="divide-y divide-slate-100">
+              {bkkWallets.map(w => <tr key={w.wallet}><td className="px-3 py-1.5 font-medium">{w.wallet}</td><td className="px-3 py-1.5 text-right tabular-nums">{fmt(w.deposit)}</td><td className="px-3 py-1.5 text-right tabular-nums">{fmt(w.withdrawal)}</td><td className="px-3 py-1.5 text-right tabular-nums">{fmt(w.depEnabled)}</td><td className="px-3 py-1.5 text-right tabular-nums">{fmt(w.wdEnabled)}</td></tr>)}
+            </tbody>
+          </table>
+        </div> : (
         <div className="card overflow-auto">
           <div className="p-4 text-sm font-semibold text-slate-700">Wallet summary</div>
           <table className="w-full text-sm">
@@ -149,6 +179,7 @@ export default function GatewayPage({ currency, gateway }: { currency: string; g
             </tbody>
           </table>
         </div>
+        )}
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">

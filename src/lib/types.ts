@@ -1,10 +1,11 @@
-export type Group = 'AGENT' | 'PERSONAL' | 'VIP' | 'WITHDRAWAL' | 'PERMANENT_STOP' | 'MCG' | 'PKR_SSG'
-export const GROUPS: Group[] = ['AGENT', 'PERSONAL', 'VIP', 'WITHDRAWAL', 'PERMANENT_STOP', 'MCG', 'PKR_SSG']
+export type Group = 'AGENT' | 'PERSONAL' | 'VIP' | 'WITHDRAWAL' | 'PERMANENT_STOP' | 'MCG' | 'PKR_SSG' | 'BKK_BAJI' | 'BKK_JB' | 'BKK_6S'
+export const GROUPS: Group[] = ['AGENT', 'PERSONAL', 'VIP', 'WITHDRAWAL', 'PERMANENT_STOP', 'MCG', 'PKR_SSG', 'BKK_BAJI', 'BKK_JB', 'BKK_6S']
 /** Agent types shown as tabs for each currency-gateway (one type shows no tabs). Keyed like 'BDT-SSG'. */
 export const GATEWAY_GROUPS: Record<string, Group[]> = {
   'BDT-SSG': ['AGENT', 'PERSONAL', 'VIP', 'WITHDRAWAL', 'PERMANENT_STOP'],
   'BDT-MCG': ['MCG'],
   'PKR-SSG': ['PKR_SSG'],
+  'PKR-BKK': ['BKK_BAJI', 'BKK_JB', 'BKK_6S'],
 }
 export const GROUP_LABEL: Record<Group, string> = {
   AGENT: 'Agents',
@@ -14,7 +15,12 @@ export const GROUP_LABEL: Record<Group, string> = {
   PERMANENT_STOP: 'Permanent Stop',
   MCG: 'MCG Agents',
   PKR_SSG: 'PKR SSG Agents',
+  BKK_BAJI: 'BAJI',
+  BKK_JB: 'JEETBUZZ',
+  BKK_6S: 'SIX6S',
 }
+/** Brand name shown for each PKR-BKK group. */
+export const BKK_BRAND: Partial<Record<Group, string>> = { BKK_BAJI: 'BAJI', BKK_JB: 'JEETBUZZ', BKK_6S: 'SIX6S' }
 
 /** Sheet tab name -> group. Add new tabs here when more gateways go live. */
 export const SHEET_GROUP: Record<string, { group: Group; currency: string; gateway: string }> = {
@@ -25,10 +31,13 @@ export const SHEET_GROUP: Record<string, { group: Group; currency: string; gatew
   'BDT-SSG-PERMANENT-STOP': { group: 'PERMANENT_STOP', currency: 'BDT', gateway: 'SSG' },
   'BDT-MCG': { group: 'MCG', currency: 'BDT', gateway: 'MCG' },
   'PKR-SSG': { group: 'PKR_SSG', currency: 'PKR', gateway: 'SSG' },
+  'PKR-BJ-BKK': { group: 'BKK_BAJI', currency: 'PKR', gateway: 'BKK' },
+  'PKR-JB-BKK': { group: 'BKK_JB', currency: 'PKR', gateway: 'BKK' },
+  'PKR-6S-BKK': { group: 'BKK_6S', currency: 'PKR', gateway: 'BKK' },
 }
 export const DATA_SHEETS = Object.keys(SHEET_GROUP)
 /** Tabs filled automatically by an Apps Script sync; Excel imports must never wipe them. */
-export const SYNCED_SHEETS = ['PKR-SSG']
+export const SYNCED_SHEETS = ['PKR-SSG', 'PKR-BJ-BKK', 'PKR-JB-BKK', 'PKR-6S-BKK']
 
 export type Health = 'low' | 'high' | 'healthy'
 /** SSG (BDT and PKR): Logged In / Logged Out / Locked. MCG: Active / Disabled / Suspended / Inactive / Locked. */
@@ -55,6 +64,23 @@ export interface AgentRow {
   commission: number
   topUp: number
   sdpPaid: number
+  /** PKR-BKK only (empty / 0 elsewhere): brand = BAJI / JEETBUZZ / SIX6S, one row per shop agent with 3 wallets */
+  brand: string
+  shop: string
+  stlm: number
+  depJazz: number
+  depUpaisa: number
+  depNaya: number
+  wdJazz: number
+  wdUpaisa: number
+  wdNaya: number
+  /** Per-wallet status: Enable / Disable / Inactive (sheet icons ✅ ⭕ ❌) */
+  depStJazz: string
+  depStUpaisa: string
+  depStNaya: string
+  wdStJazz: string
+  wdStUpaisa: string
+  wdStNaya: string
   /** OPENING + DEPOSIT - WITHDRAWAL - ADJUSTMENT */
   rBal: number
   aBal: number
@@ -112,6 +138,10 @@ export const DEFAULT_SETTINGS: Settings = {
     MCG: { low: 1000, high: 30000, discrep: 5000 },
     // 'high' is unused for PKR SSG: higher balance is judged against each account's SDP.
     PKR_SSG: { low: 5000, high: 50000, discrep: 10000 },
+    // PKR-BKK: no actual balance exists, so 'discrep' is unused. 'high' is the higher-balance limit for agents without an SDP.
+    BKK_BAJI: { low: 5000, high: 100000, discrep: 0 },
+    BKK_JB: { low: 5000, high: 100000, discrep: 0 },
+    BKK_6S: { low: 5000, high: 100000, discrep: 0 },
   },
-  gatewayBalance: { 'BDT-SSG': { high: 0 }, 'BDT-MCG': { high: 0 }, 'PKR-SSG': { high: 0 } },
+  gatewayBalance: { 'BDT-SSG': { high: 0 }, 'BDT-MCG': { high: 0 }, 'PKR-SSG': { high: 0 }, 'PKR-BKK': { high: 0 } },
 }

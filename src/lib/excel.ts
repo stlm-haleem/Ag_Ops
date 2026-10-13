@@ -24,6 +24,9 @@ export function importTargetLabel(sheetName: string): string {
   const group = SHEET_GROUP[sheetName]?.group
   if (group === 'MCG') return 'BDT · MCG'
   if (group === 'PKR_SSG') return 'PKR · SSG'
+  if (group === 'BKK_BAJI') return 'PKR · BKK · BAJI'
+  if (group === 'BKK_JB') return 'PKR · BKK · JEETBUZZ'
+  if (group === 'BKK_6S') return 'PKR · BKK · SIX6S'
   if (group === 'WITHDRAWAL') return 'BDT · SSG · Withdrawal only'
   if (group === 'PERMANENT_STOP') return 'BDT · SSG · Permanent Stop'
   if (group) return `BDT · SSG · ${group === 'AGENT' ? 'Agents' : group === 'PERSONAL' ? 'Personal' : 'VIP'}`

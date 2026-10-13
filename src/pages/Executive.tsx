@@ -43,7 +43,7 @@ export default function Executive() {
     return [...m.values()].sort((a, b) => a.date.localeCompare(b.date))
   }, [analytics, currency, gateway, from, to])
 
-  const byGroup = useMemo(() => GROUPS.map(g => ({ name: GROUP_LABEL[g], rBal: scoped.filter(r => r.group === g).reduce((s, r) => s + r.rBal, 0), aBal: scoped.filter(r => r.group === g).reduce((s, r) => s + r.aBal, 0) })), [scoped])
+  const byGroup = useMemo(() => GROUPS.filter(g => scoped.some(r => r.group === g)).map(g => ({ name: GROUP_LABEL[g], rBal: scoped.filter(r => r.group === g).reduce((s, r) => s + r.rBal, 0), aBal: scoped.filter(r => r.group === g).reduce((s, r) => s + r.aBal, 0) })), [scoped])
 
   const sel = (v: string, set: (s: string) => void, label: string, opts: string[]) => (
     <label className="text-xs text-slate-500">{label}

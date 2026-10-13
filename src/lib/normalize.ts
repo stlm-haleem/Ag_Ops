@@ -1,4 +1,4 @@
-import { AgentRow, Dataset, Settings, SHEET_GROUP, Threshold } from './types'
+import { AgentRow, BKK_BRAND, Dataset, RawSheet, Settings, SHEET_GROUP, Threshold } from './types'
 
 const num = (v: unknown): number => {
   if (typeof v === 'number') return Number.isFinite(v) ? v : 0
@@ -25,19 +25,21 @@ export function pkrState(status: string, sdp: number) {
   return loginState(status)
 }
 
-export function higherBalanceThreshold(row: Pick<AgentRow, 'actSdp' | 'gateway' | 'currency'>) {
+export function higherBalanceThreshold(row: Pick<AgentRow, 'actSdp' | 'gateway' | 'currency'>, t?: Threshold) {
   if (row.actSdp > 0) return row.actSdp
+  // PKR-BKK: no SDP -> use the higher-balance threshold set in Settings for the brand.
+  if (row.gateway === 'BKK') return t?.high ?? Number.POSITIVE_INFINITY
   // PKR-SSG: no SDP means a locked account, so there is no higher-balance limit to compare against.
   if (row.currency === 'PKR') return Number.POSITIVE_INFINITY
   return row.gateway === 'MCG' ? 50000 : 100000
 }
 
 export function classify(row: Pick<AgentRow, 'rBal' | 'discrep' | 'deposit' | 'utilizedLimit' | 'actSdp' | 'gateway' | 'currency'>, t: Threshold) {
-  const highThreshold = higherBalanceThreshold(row)
+  const highThreshold = higherBalanceThreshold(row, t)
   return {
     health: row.rBal < t.low ? ('low' as const) : row.rBal > highThreshold ? ('high' as const) : ('healthy' as const),
     highDiscrep: Math.abs(row.discrep) >= t.discrep,
-    limitExceeded: row.deposit > row.utilizedLimit,
+    limitExceeded: row.gateway === 'BKK' ? false : row.deposit > row.utilizedLimit,
   }
 }
 
@@ -82,6 +84,7 @@ export function normalize(ds: Dataset, settings: Settings): AgentRow[] {
   for (const sh of ds.sheets) {
     const meta = SHEET_GROUP[sh.name]
     if (!meta) continue
+    if (meta.gateway === 'BKK') { out.push(...normalizeBkk(sh, meta, settings)); continue }
     // The header should be row 1, but a synced tab can carry a title/blank row above it:
     // if there is no account column, look for the real header row in the first few rows.
     const hasAccountCol = (h: unknown) => Array.isArray(h) && h.some(c => ['ACCOUNTS', 'AGENT ID'].includes(str(c).toUpperCase()))
@@ -129,6 +132,7 @@ export function normalize(ds: Dataset, settings: Settings): AgentRow[] {
         opening, deposit, withdrawal, adjustment, rBal, aBal, discrep,
         unconfirmedWd: num(g(r, 'unconfirmedWd')), charge: num(g(r, 'charge')), commission: num(g(r, 'commission')),
         topUp: num(g(r, 'topUp')), sdpPaid: num(g(r, 'sdpPaid')),
+        ...EMPTY_BKK,
         status,
         login: isMcg ? mcgState(status, tx) : isPkr ? pkrState(status, num(g(r, 'actSdp'))) : loginState(status),
         code: isMcg ? tx : str(g(r, 'code')),
@@ -143,6 +147,111 @@ export function normalize(ds: Dataset, settings: Settings): AgentRow[] {
       Object.assign(row, classify(row, t))
       out.push(row)
     }
+  }
+  return out
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * PKR-BKK (BAJI / JEETBUZZ / SIX6S)
+ *
+ * Each tab has a TWO-row header. Row 1 holds the group titles (merged across the wallet columns, so only the
+ * first cell has text) and row 2 holds the wallet names under them:
+ *
+ *   SDP | SHOP NAME | ACCOUNT NAME | OPENING | DEPOSIT [JAZZCASH UPAISA NAYAPAY TOTAL] | WITHDRAWAL | STLM/SPC | TOP UP |
+ *   RUNNING BALANCE | DEPOSIT STATUS [JAZZCASH UPAISA NAYAPAY] | WITHDRAWAL STATUS [JAZZCASH UPAISA NAYAPAY] |
+ *   EXCEED [status | JAZZCASH UPAISA NAYAPAY withdrawal | Remark (ignored)]
+ *
+ * The data starts on row 3. Apps Script sends row 1 as the header and row 2 as the first data row, so the wallet
+ * row is located by looking for the wallet names. Columns are found by label, never by fixed position.
+ * ---------------------------------------------------------------------------------------------- */
+
+const EMPTY_BKK = {
+  brand: '', shop: '', stlm: 0, depJazz: 0, depUpaisa: 0, depNaya: 0, wdJazz: 0, wdUpaisa: 0, wdNaya: 0,
+  depStJazz: '', depStUpaisa: '', depStNaya: '', wdStJazz: '', wdStUpaisa: '', wdStNaya: '',
+}
+
+export const BKK_STATUS_LABEL: Record<string, string> = { '✅': 'Enable', '⭕': 'Disable', '❌': 'Inactive' }
+export function bkkStatus(v: unknown): string {
+  const s = str(v)
+  for (const [icon, label] of Object.entries(BKK_STATUS_LABEL)) if (s.includes(icon)) return label
+  const t = s.toLowerCase()
+  if (t.startsWith('enable')) return 'Enable'
+  if (t.startsWith('disable')) return 'Disable'
+  if (t.startsWith('inactive')) return 'Inactive'
+  return ''
+}
+
+const walletIndex = (label: string) => {
+  const t = label.toUpperCase()
+  return t.includes('JAZZ') ? 0 : t.includes('UPAISA') || t.includes('UPAYSA') ? 1 : t.includes('NAYA') ? 2 : -1
+}
+
+export function normalizeBkk(sh: RawSheet, meta: { group: AgentRow['group']; currency: string; gateway: string }, settings: Settings): AgentRow[] {
+  const all: unknown[][] = [sh.header, ...sh.rows].filter(Array.isArray) as unknown[][]
+  const subAt = all.slice(0, 4).findIndex(r => r.filter(c => walletIndex(str(c)) >= 0).length >= 3)
+  if (subAt < 1) return []
+  const top = all[subAt - 1], sub = all[subAt], body = all.slice(subAt + 1)
+  const width = Math.max(top.length, sub.length)
+
+  // Row 1 titles are merged: carry each title across the blank cells to its right.
+  const group: string[] = []
+  let cur = ''
+  for (let i = 0; i < width; i++) { const t = str(top[i]).toUpperCase(); if (t) cur = t; group.push(cur) }
+  const label = (i: number) => str(sub[i]).toUpperCase()
+
+  const one = (title: string, test: (sublabel: string) => boolean = () => true) =>
+    group.findIndex((g, i) => g === title && test(label(i)))
+  const wallets = (title: string): number[] => {
+    const idx: number[] = [-1, -1, -1]
+    group.forEach((g, i) => { if (g === title) { const w = walletIndex(label(i)); if (w >= 0 && idx[w] < 0) idx[w] = i } })
+    return idx
+  }
+  const c = {
+    sdp: one('SDP'), shop: one('SHOP NAME'), account: one('ACCOUNT NAME'), opening: one('OPENING'),
+    depTotal: one('DEPOSIT', l => l.includes('TOTAL') || l === 'DEPOSIT'),
+    withdrawal: one('WITHDRAWAL'), stlm: one('STLM/SPC'), topUp: one('TOP UP'),
+    exceed: one('EXCEED', l => l === ''),
+    dep: wallets('DEPOSIT'), depSt: wallets('DEPOSIT STATUS'), wdSt: wallets('WITHDRAWAL STATUS'), wd: wallets('EXCEED'),
+  }
+  if (c.account < 0) return []
+
+  const brand = BKK_BRAND[meta.group] ?? ''
+  const t = settings.thresholds[meta.group]
+  const v = (r: unknown[], i: number) => (i < 0 ? 0 : num(r[i]))
+  const out: AgentRow[] = []
+  for (const r of body) {
+    const account = str(r[c.account])
+    if (!account) continue
+    const dep = c.dep.map(i => v(r, i)) as [number, number, number]
+    const wd = c.wd.map(i => Math.abs(v(r, i))) as [number, number, number]
+    const depSt = c.depSt.map(i => (i < 0 ? '' : bkkStatus(r[i])))
+    const wdSt = c.wdSt.map(i => (i < 0 ? '' : bkkStatus(r[i])))
+    const deposit = c.depTotal >= 0 ? v(r, c.depTotal) : dep[0] + dep[1] + dep[2]
+    // The sheet stores the total withdrawal as a negative number: always treat it as an amount going out.
+    const withdrawal = Math.abs(v(r, c.withdrawal))
+    const opening = v(r, c.opening)
+    const stlm = v(r, c.stlm)
+    const topUp = v(r, c.topUp)
+    // RUNNING BALANCE = Opening + Total deposit - Withdrawal - STLM/SPC - Top up
+    const rBal = round2(opening + deposit - withdrawal - stlm - topUp)
+    const states = [...depSt, ...wdSt]
+    const login = states.includes('Enable') ? 'Active' : states.includes('Disable') ? 'Disabled' : 'Inactive'
+    const exceed = c.exceed >= 0 ? str(r[c.exceed]) : ''
+    const row: AgentRow = {
+      id: `${sh.name}:${account}`, account, group: meta.group, currency: meta.currency, gateway: meta.gateway,
+      actSdp: v(r, c.sdp), mrcLmt: 0, dpBalLimit: 0, utilizedLimit: 0,
+      opening, deposit, withdrawal, adjustment: 0, unconfirmedWd: 0, charge: 0, commission: 0, topUp, sdpPaid: 0,
+      rBal, aBal: 0, discrep: 0,
+      status: login, login, code: '', whrs: '', wallet: '', limitStatus: exceed, acctType: brand, tags: '', remarks: '',
+      brand, shop: c.shop >= 0 ? str(r[c.shop]) : '', stlm,
+      depJazz: dep[0], depUpaisa: dep[1], depNaya: dep[2], wdJazz: wd[0], wdUpaisa: wd[1], wdNaya: wd[2],
+      depStJazz: depSt[0], depStUpaisa: depSt[1], depStNaya: depSt[2], wdStJazz: wdSt[0], wdStUpaisa: wdSt[1], wdStNaya: wdSt[2],
+      health: 'healthy', highDiscrep: false, limitExceeded: false,
+    }
+    Object.assign(row, classify(row, t))
+    // The sheet's own EXCEED column drives the limit-exceeded alert (there is no DP limit column in these tabs).
+    row.limitExceeded = exceed.toUpperCase() === 'EXCEED'
+    out.push(row)
   }
   return out
 }

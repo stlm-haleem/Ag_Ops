@@ -51,3 +51,30 @@ export const compact = (n: number) => {
   if (a >= 1e3) return (n / 1e3).toFixed(1) + 'K'
   return n.toFixed(0)
 }
+
+/** PKR-BKK: every agent row carries three wallets, so wallet totals are summed from the per-wallet columns. */
+export interface BkkWalletStat { wallet: string; deposit: number; withdrawal: number; depEnabled: number; wdEnabled: number }
+export function byBkkWallet(rows: AgentRow[]): BkkWalletStat[] {
+  const defs: [string, 'depJazz' | 'depUpaisa' | 'depNaya', 'wdJazz' | 'wdUpaisa' | 'wdNaya', 'depStJazz' | 'depStUpaisa' | 'depStNaya', 'wdStJazz' | 'wdStUpaisa' | 'wdStNaya'][] = [
+    ['JAZZCASH', 'depJazz', 'wdJazz', 'depStJazz', 'wdStJazz'],
+    ['UPAISA', 'depUpaisa', 'wdUpaisa', 'depStUpaisa', 'wdStUpaisa'],
+    ['NAYAPAY', 'depNaya', 'wdNaya', 'depStNaya', 'wdStNaya'],
+  ]
+  return defs.map(([wallet, d, w, ds, ws]) => ({
+    wallet,
+    deposit: rows.reduce((s, r) => s + r[d], 0),
+    withdrawal: rows.reduce((s, r) => s + r[w], 0),
+    depEnabled: rows.filter(r => r[ds] === 'Enable').length,
+    wdEnabled: rows.filter(r => r[ws] === 'Enable').length,
+  }))
+}
+
+/** Running balance per shop (PKR-BKK), largest first. */
+export function byShop(rows: AgentRow[]) {
+  const m = new Map<string, { shop: string; agents: number; rBal: number }>()
+  for (const r of rows) {
+    const s = m.get(r.shop) ?? { shop: r.shop || '—', agents: 0, rBal: 0 }
+    s.agents++; s.rBal += r.rBal; m.set(r.shop, s)
+  }
+  return [...m.values()].sort((a, b) => b.rBal - a.rBal)
+}

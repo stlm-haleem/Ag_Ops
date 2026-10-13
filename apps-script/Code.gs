@@ -15,13 +15,15 @@
  */
 
 var FOLDER_NAME = 'PaymentOpsMonitor';
-var DATA_SHEETS = ['BDT-SSG-AGENT', 'BDT-SSG-PERSONAL', 'BDT-SSG-VIP', 'BDT-SSG-WITHDRAWAL-ONLY', 'BDT-SSG-PERMANENT-STOP', 'BDT-MCG', 'PKR-SSG'];
+var DATA_SHEETS = ['BDT-SSG-AGENT', 'BDT-SSG-PERSONAL', 'BDT-SSG-VIP', 'BDT-SSG-WITHDRAWAL-ONLY', 'BDT-SSG-PERMANENT-STOP', 'BDT-MCG', 'PKR-SSG', 'PKR-BJ-BKK', 'PKR-JB-BKK', 'PKR-6S-BKK'];
 // Tabs filled by a script sync (not by Excel import). A full-workbook import must never clear them.
-var SYNCED_SHEETS = ['PKR-SSG'];
+var SYNCED_SHEETS = ['PKR-SSG', 'PKR-BJ-BKK', 'PKR-JB-BKK', 'PKR-6S-BKK'];
+var BKK_SHEETS = ['PKR-BJ-BKK', 'PKR-JB-BKK', 'PKR-6S-BKK'];
 
 // PKR-SSG is synced into the spreadsheet in ACCTLIST_DESTINATION_SPREADSHEET_ID (defined further down), which can be a
 // different file from the one in SHEET_ID that holds the BDT tabs. Read every tab from the spreadsheet it really lives in.
 function spreadsheetFor_(name) {
+  if (BKK_SHEETS.indexOf(name) >= 0) return SpreadsheetApp.openById(BJSM_DESTINATION_SPREADSHEET_ID);
   if (SYNCED_SHEETS.indexOf(name) >= 0) return SpreadsheetApp.openById(ACCTLIST_DESTINATION_SPREADSHEET_ID);
   return spreadsheet_();
 }
@@ -33,7 +35,8 @@ var BACKUP_ROWS_PER_CHUNK = 1000;
 var DAILY_GATEWAYS = {
   'BDT-SSG': { currency: 'BDT', gateway: 'SSG', sheets: ['BDT-SSG-AGENT', 'BDT-SSG-PERSONAL', 'BDT-SSG-VIP', 'BDT-SSG-WITHDRAWAL-ONLY', 'BDT-SSG-PERMANENT-STOP'] },
   'BDT-MCG': { currency: 'BDT', gateway: 'MCG', sheets: ['BDT-MCG'] },
-  'PKR-SSG': { currency: 'PKR', gateway: 'SSG', sheets: ['PKR-SSG'] }
+  'PKR-SSG': { currency: 'PKR', gateway: 'SSG', sheets: ['PKR-SSG'] },
+  'PKR-BKK': { currency: 'PKR', gateway: 'BKK', sheets: ['PKR-BJ-BKK', 'PKR-JB-BKK', 'PKR-6S-BKK'] }
 };
 
 /* ------------------------------ entry points ------------------------------ */
@@ -475,6 +478,20 @@ function sumTab_(sh) {
   var out = { deposit: 0, withdrawal: 0 };
   var last = sh.getLastRow();
   if (last < 2) return out;
+  // PKR-BKK tabs have a two-row header (group title on row 1, JAZZCASH / UPAISA / NAYAPAY on row 2), data from row 3.
+  // Deposit = the TOTAL DEPOSIT column; Withdrawal = the WITHDRAWAL column (stored negative, so summed as amounts out).
+  var topRow = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].map(function (h) { return String(h).trim().toUpperCase(); });
+  var subRow = sh.getRange(2, 1, 1, sh.getLastColumn()).getValues()[0].map(function (h) { return String(h).trim().toUpperCase(); });
+  if (subRow.indexOf('JAZZCASH') >= 0 && subRow.indexOf('UPAISA') >= 0) {
+    var depC = -1;
+    for (var ci = 0; ci < subRow.length; ci++) { if (subRow[ci] === 'TOTAL DEPOSIT' || subRow[ci] === 'DEPOSIT') { depC = ci + 1; break; } }
+    var wdC = topRow.indexOf('WITHDRAWAL') + 1;
+    if (last >= 3) {
+      if (depC > 0) sh.getRange(3, depC, last - 2, 1).getValues().forEach(function (r) { out.deposit += numVal_(r[0]); });
+      if (wdC > 0) sh.getRange(3, wdC, last - 2, 1).getValues().forEach(function (r) { out.withdrawal += Math.abs(numVal_(r[0])); });
+    }
+    return out;
+  }
   var header = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].map(function (h) { return String(h).trim().toUpperCase(); });
   var dCol = header.indexOf('DEPOSIT') + 1, wCol = header.indexOf('WITHDRAWAL') + 1;
   if (dCol > 0) sh.getRange(2, dCol, last - 1, 1).getValues().forEach(function (r) { out.deposit += numVal_(r[0]); });
@@ -655,6 +672,9 @@ function syncBJSMtoPKRBKK() {
   }
 
   // Remove old destination content and formatting.
+  // Remember whether the data really changed, so the dashboard only re-downloads this tab when needed.
+  const bkkChanged = JSON.stringify(destination.getDataRange().getValues()) !== JSON.stringify(sourceRange.getValues());
+
   const oldRange = destination.getDataRange();
   oldRange.breakApart();
   oldRange.clear();
@@ -702,6 +722,9 @@ function syncBJSMtoPKRBKK() {
   for (let r = 1; r <= rows; r++) {
     destination.setRowHeight(r, source.getRowHeight(r));
   }
+
+  // The onEdit trigger does not fire for script writes, so tell the dashboard that this tab changed.
+  if (bkkChanged) props_().setProperty(sheetRevisionKey_("PKR-BJ-BKK"), String(Date.now()));
 
   Logger.log(
     "Sync completed: " + rows + " rows, " + cols + " columns."
@@ -919,6 +942,9 @@ function syncBKKTab_(sourceTabName, destinationTabName) {
     );
   }
 
+  // Remember whether the data really changed, so the dashboard only re-downloads this tab when needed.
+  const bkkChanged = JSON.stringify(destination.getDataRange().getValues()) !== JSON.stringify(sourceRange.getValues());
+
   const oldRange = destination.getDataRange();
   oldRange.breakApart();
   oldRange.clear();
@@ -959,6 +985,8 @@ function syncBKKTab_(sourceTabName, destinationTabName) {
   for (let r = 1; r <= rows; r++) {
     destination.setRowHeight(r, source.getRowHeight(r));
   }
+
+  if (bkkChanged) props_().setProperty(sheetRevisionKey_(destinationTabName), String(Date.now()));
 
   Logger.log(
     sourceTabName + " -> " + destinationTabName +
