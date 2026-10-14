@@ -15,9 +15,9 @@
  */
 
 var FOLDER_NAME = 'PaymentOpsMonitor';
-var DATA_SHEETS = ['BDT-SSG-AGENT', 'BDT-SSG-PERSONAL', 'BDT-SSG-VIP', 'BDT-SSG-WITHDRAWAL-ONLY', 'BDT-SSG-PERMANENT-STOP', 'BDT-MCG', 'PKR-SSG', 'PKR-BJ-BKK', 'PKR-JB-BKK', 'PKR-6S-BKK'];
+var DATA_SHEETS = ['BDT-SSG-AGENT', 'BDT-SSG-PERSONAL', 'BDT-SSG-VIP', 'BDT-SSG-WITHDRAWAL-ONLY', 'BDT-SSG-PERMANENT-STOP', 'BDT-MCG', 'PKR-SSG', 'PKR-BJ-BKK', 'PKR-JB-BKK', 'PKR-6S-BKK', 'PKR-LOCALBANK'];
 // Tabs filled by a script sync (not by Excel import). A full-workbook import must never clear them.
-var SYNCED_SHEETS = ['PKR-SSG', 'PKR-BJ-BKK', 'PKR-JB-BKK', 'PKR-6S-BKK'];
+var SYNCED_SHEETS = ['PKR-SSG', 'PKR-BJ-BKK', 'PKR-JB-BKK', 'PKR-6S-BKK', 'PKR-LOCALBANK'];
 var BKK_SHEETS = ['PKR-BJ-BKK', 'PKR-JB-BKK', 'PKR-6S-BKK'];
 
 // PKR-SSG is synced into the spreadsheet in ACCTLIST_DESTINATION_SPREADSHEET_ID (defined further down), which can be a
@@ -1020,4 +1020,187 @@ function setupNewBKKSyncs() {
     .timeBased()
     .everyMinutes(5)
     .create();
+}
+
+
+
+
+
+
+
+
+
+
+// PKR Local Bank source spreadsheet.
+const LOCALBANK_SOURCE_SPREADSHEET_ID =
+  "1fUF513D2mxIAaqtb7M5DsTUjrnVgS_SrqYaXKS2Twks";
+
+// Sync MONITORING -> PKR-LOCALBANK.
+function syncLocalBankToPKRLocalBank() {
+  const sourceSS = SpreadsheetApp.openById(
+    LOCALBANK_SOURCE_SPREADSHEET_ID
+  );
+
+  const destinationSS = SpreadsheetApp.openById(
+    ACCTLIST_DESTINATION_SPREADSHEET_ID
+  );
+
+  const source = sourceSS.getSheetByName("MONITORING");
+  const destination = destinationSS.getSheetByName("PKR-LOCALBANK");
+
+  if (!source) {
+    throw new Error('Source tab "MONITORING" not found.');
+  }
+
+  if (!destination) {
+    throw new Error('Destination tab "PKR-LOCALBANK" not found.');
+  }
+
+  const sourceRange = source.getDataRange();
+  const newValues = sourceRange.getValues();
+
+  const rows = Math.max(sourceRange.getNumRows(), 1);
+  const cols = Math.max(sourceRange.getNumColumns(), 1);
+
+  // Ensure the destination has enough space.
+  if (destination.getMaxRows() < rows) {
+    destination.insertRowsAfter(
+      destination.getMaxRows(),
+      rows - destination.getMaxRows()
+    );
+  }
+
+  if (destination.getMaxColumns() < cols) {
+    destination.insertColumnsAfter(
+      destination.getMaxColumns(),
+      cols - destination.getMaxColumns()
+    );
+  }
+
+  // Detect data changes for the dashboard cache.
+  const oldValues = destination.getDataRange().getValues();
+  const changed =
+    JSON.stringify(oldValues) !== JSON.stringify(newValues);
+
+  // Clear old destination content and formatting.
+  const oldRange = destination.getDataRange();
+  oldRange.breakApart();
+  oldRange.clear();
+
+  const targetRange = destination.getRange(1, 1, rows, cols);
+
+  // Copy values.
+  targetRange.setValues(newValues);
+
+  // Copy common formatting.
+  targetRange.setBackgrounds(sourceRange.getBackgrounds());
+  targetRange.setFontColors(sourceRange.getFontColors());
+  targetRange.setFontFamilies(sourceRange.getFontFamilies());
+  targetRange.setFontSizes(sourceRange.getFontSizes());
+  targetRange.setFontWeights(sourceRange.getFontWeights());
+  targetRange.setFontStyles(sourceRange.getFontStyles());
+  targetRange.setFontLines(sourceRange.getFontLines());
+  targetRange.setHorizontalAlignments(
+    sourceRange.getHorizontalAlignments()
+  );
+  targetRange.setVerticalAlignments(
+    sourceRange.getVerticalAlignments()
+  );
+  targetRange.setNumberFormats(sourceRange.getNumberFormats());
+  targetRange.setWraps(sourceRange.getWraps());
+  targetRange.setTextRotations(sourceRange.getTextRotations());
+
+  // Copy merged cells.
+  sourceRange.getMergedRanges().forEach(function (merged) {
+    destination.getRange(
+      merged.getRow(),
+      merged.getColumn(),
+      merged.getNumRows(),
+      merged.getNumColumns()
+    ).merge();
+  });
+
+  // Copy column widths and row heights.
+  for (let c = 1; c <= cols; c++) {
+    destination.setColumnWidth(c, source.getColumnWidth(c));
+  }
+
+  for (let r = 1; r <= rows; r++) {
+    destination.setRowHeight(r, source.getRowHeight(r));
+  }
+
+  // Notify the dashboard when the data changes.
+  if (changed) {
+    props_().setProperty(
+      sheetRevisionKey_("PKR-LOCALBANK"),
+      String(Date.now())
+    );
+  }
+
+  Logger.log(
+    "Local Bank sync completed: " +
+    rows + " rows, " + cols + " columns."
+  );
+}
+
+
+// Run once to install the five-minute trigger.
+function setupPKRLocalBankFiveMinuteSync() {
+  ScriptApp.getProjectTriggers()
+    .filter(function (trigger) {
+      return trigger.getHandlerFunction() ===
+        "syncLocalBankToPKRLocalBank";
+    })
+    .forEach(function (trigger) {
+      ScriptApp.deleteTrigger(trigger);
+    });
+
+  ScriptApp.newTrigger("syncLocalBankToPKRLocalBank")
+    .timeBased()
+    .everyMinutes(5)
+    .create();
+
+  // Perform the initial sync immediately.
+  syncLocalBankToPKRLocalBank();
+}
+
+
+
+
+function testLocalBankL12() {
+  const ss = SpreadsheetApp.openById(
+    "1fUF513D2mxIAaqtb7M5DsTUjrnVgS_SrqYaXKS2Twks"
+  );
+
+  const sheet = ss.getSheetByName("MONITORING");
+
+  SpreadsheetApp.flush();
+  Utilities.sleep(2000);
+
+  const cell = sheet.getRange("L12");
+
+  Logger.log("Formula: " + cell.getFormula());
+  Logger.log("Raw value: " + cell.getValue());
+  Logger.log("Displayed value: " + cell.getDisplayValue());
+  Logger.log("Spreadsheet timezone: " + ss.getSpreadsheetTimeZone());
+}
+
+
+function checkLocalBankTimezones() {
+  const ss = SpreadsheetApp.openById(
+    "1fUF513D2mxIAaqtb7M5DsTUjrnVgS_SrqYaXKS2Twks"
+  );
+
+  Logger.log("Spreadsheet timezone: " + ss.getSpreadsheetTimeZone());
+  Logger.log("Script timezone: " + Session.getScriptTimeZone());
+
+  Logger.log(
+    "Spreadsheet date: " +
+    Utilities.formatDate(new Date(), ss.getSpreadsheetTimeZone(), "yyyy-MM-dd")
+  );
+
+  Logger.log(
+    "Sri Lanka date: " +
+    Utilities.formatDate(new Date(), "Asia/Colombo", "yyyy-MM-dd")
+  );
 }

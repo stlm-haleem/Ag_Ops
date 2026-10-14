@@ -4,6 +4,7 @@ import CurrencyOverview from './pages/CurrencyOverview'
 import DataSources from './pages/DataSources'
 import Executive from './pages/Executive'
 import GatewayPage from './pages/GatewayPage'
+import LocalBankPage from './pages/LocalBankPage'
 import SettingsPage from './pages/Settings'
 
 export default function App() {
@@ -23,7 +24,7 @@ export default function App() {
         <Route path="/currency/pkr/ssg" element={<GatewayPage key="pkr-ssg" currency="PKR" gateway="SSG" />} />
         <Route path="/currency/pkr/bangkok-pay" element={<GatewayPage key="pkr-bkk" currency="PKR" gateway="BKK" />} />
         <Route path="/currency/pkr/bkk" element={<GatewayPage key="pkr-bkk2" currency="PKR" gateway="BKK" />} />
-        <Route path="/currency/pkr/local-bank" element={<Placeholder title="PKR · Local Bank" />} />
+        <Route path="/currency/pkr/local-bank" element={<LocalBankPage />} />
         <Route path="/currency/inr" element={<Placeholder title="INR" note="INR is not live yet." />} />
         <Route path="/reports" element={<Placeholder title="Reports" />} />
         <Route path="/admin/data-sources" element={<DataSources />} />

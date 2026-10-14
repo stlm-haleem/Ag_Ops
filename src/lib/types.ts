@@ -1,5 +1,5 @@
-export type Group = 'AGENT' | 'PERSONAL' | 'VIP' | 'WITHDRAWAL' | 'PERMANENT_STOP' | 'MCG' | 'PKR_SSG' | 'BKK_BAJI' | 'BKK_JB' | 'BKK_6S'
-export const GROUPS: Group[] = ['AGENT', 'PERSONAL', 'VIP', 'WITHDRAWAL', 'PERMANENT_STOP', 'MCG', 'PKR_SSG', 'BKK_BAJI', 'BKK_JB', 'BKK_6S']
+export type Group = 'AGENT' | 'PERSONAL' | 'VIP' | 'WITHDRAWAL' | 'PERMANENT_STOP' | 'MCG' | 'PKR_SSG' | 'BKK_BAJI' | 'BKK_JB' | 'BKK_6S' | 'LOCAL_BANK'
+export const GROUPS: Group[] = ['AGENT', 'PERSONAL', 'VIP', 'WITHDRAWAL', 'PERMANENT_STOP', 'MCG', 'PKR_SSG', 'BKK_BAJI', 'BKK_JB', 'BKK_6S', 'LOCAL_BANK']
 /** Agent types shown as tabs for each currency-gateway (one type shows no tabs). Keyed like 'BDT-SSG'. */
 export const GATEWAY_GROUPS: Record<string, Group[]> = {
   'BDT-SSG': ['AGENT', 'PERSONAL', 'VIP', 'WITHDRAWAL', 'PERMANENT_STOP'],
@@ -18,6 +18,7 @@ export const GROUP_LABEL: Record<Group, string> = {
   BKK_BAJI: 'BAJI',
   BKK_JB: 'JEETBUZZ',
   BKK_6S: 'SIX6S',
+  LOCAL_BANK: 'Local Bank',
 }
 /** Brand name shown for each PKR-BKK group. */
 export const BKK_BRAND: Partial<Record<Group, string>> = { BKK_BAJI: 'BAJI', BKK_JB: 'JEETBUZZ', BKK_6S: 'SIX6S' }
@@ -36,8 +37,13 @@ export const SHEET_GROUP: Record<string, { group: Group; currency: string; gatew
   'PKR-6S-BKK': { group: 'BKK_6S', currency: 'PKR', gateway: 'BKK' },
 }
 export const DATA_SHEETS = Object.keys(SHEET_GROUP)
+/**
+ * PKR Local Bank (banks only). The tab is a values-only copy of the MONITORING sheet of the Local Bank workbook, filled by
+ * the Apps Script sync. It stacks several tables, so it is read by src/lib/localBank.ts, not by normalize() (not in SHEET_GROUP).
+ */
+export const LOCALBANK_SHEET = 'PKR-LOCALBANK'
 /** Tabs filled automatically by an Apps Script sync; Excel imports must never wipe them. */
-export const SYNCED_SHEETS = ['PKR-SSG', 'PKR-BJ-BKK', 'PKR-JB-BKK', 'PKR-6S-BKK']
+export const SYNCED_SHEETS = ['PKR-SSG', 'PKR-BJ-BKK', 'PKR-JB-BKK', 'PKR-6S-BKK', LOCALBANK_SHEET]
 
 export type Health = 'low' | 'high' | 'healthy'
 /** SSG (BDT and PKR): Logged In / Logged Out / Locked. MCG: Active / Disabled / Suspended / Inactive / Locked. */
@@ -142,6 +148,8 @@ export const DEFAULT_SETTINGS: Settings = {
     BKK_BAJI: { low: 5000, high: 100000, discrep: 0 },
     BKK_JB: { low: 5000, high: 100000, discrep: 0 },
     BKK_6S: { low: 5000, high: 100000, discrep: 0 },
+    // PKR Local Bank: no actual balance. 'high' is the higher-balance limit for an active account without a security deposit (SDP).
+    LOCAL_BANK: { low: 5000, high: 100000, discrep: 0 },
   },
   gatewayBalance: { 'BDT-SSG': { high: 0 }, 'BDT-MCG': { high: 0 }, 'PKR-SSG': { high: 0 }, 'PKR-BKK': { high: 0 } },
 }
