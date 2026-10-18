@@ -243,12 +243,72 @@ export default function BdtLocalBankPage() {
           </ChartCard>
         </div>
         <ChartCard title="Month deposit (inner ring) & withdrawal (outer ring) by bank">
-          {k.monthDp + k.monthWd > 0 ? <ResponsiveContainer><PieChart>
-            <Pie data={banks.map(b => ({ name: b.bank, value: b.monthDp }))} dataKey="value" nameKey="name" innerRadius={32} outerRadius={62} paddingAngle={2}>{banks.map(b => <Cell key={b.bank} fill={BANK_COLOR[b.bank] ?? '#94a3b8'} />)}</Pie>
-            <Pie data={banks.map(b => ({ name: b.bank, value: b.monthWd }))} dataKey="value" nameKey="name" innerRadius={70} outerRadius={100} paddingAngle={2}
-              label={(e: { name: string; percent: number }) => `${e.name} ${(e.percent * 100).toFixed(0)}%`} labelLine={false} fontSize={10}>{banks.map(b => <Cell key={b.bank} fill={BANK_COLOR[b.bank] ?? '#94a3b8'} fillOpacity={0.6} />)}</Pie>
-            <Tooltip formatter={(v: number, _n: string, item: { payload?: { name?: string } }) => fmt(v, 2)} /><Legend />
-          </PieChart></ResponsiveContainer> : <Empty>No deposits or withdrawals yet</Empty>}
+          {k.monthDp + k.monthWd > 0 ? (
+            <ResponsiveContainer>
+              <PieChart>
+                {/* Inner ring: Monthly deposits */}
+                <Pie
+                  data={banks.map(b => ({
+                    name: b.bank,
+                    value: b.monthDp,
+                  }))}
+                  dataKey="value"
+                  nameKey="name"
+                  innerRadius={32}
+                  outerRadius={62}
+                  paddingAngle={2}
+                >
+                  {banks.map(b => (
+                    <Cell
+                      key={b.bank}
+                      fill={BANK_COLOR[b.bank] ?? '#94a3b8'}
+                    />
+                  ))}
+                </Pie>
+
+                {/* Outer ring: Monthly withdrawals */}
+                <Pie
+                  data={banks.map(b => ({
+                    name: b.bank,
+                    value: b.monthWd,
+                  }))}
+                  dataKey="value"
+                  nameKey="name"
+                  innerRadius={70}
+                  outerRadius={100}
+                  paddingAngle={2}
+                  label={(e: { name: string; percent: number }) =>
+                    `${e.name} ${(e.percent * 100).toFixed(0)}%`
+                  }
+                  labelLine={false}
+                >
+                  {banks.map(b => (
+                    <Cell
+                      key={b.bank}
+                      fill={BANK_COLOR[b.bank] ?? '#94a3b8'}
+                      fillOpacity={0.6}
+                    />
+                  ))}
+                </Pie>
+
+                {/* Tooltip */}
+                <Tooltip
+                  formatter={(v: number) => fmt(v, 2)}
+                />
+
+                {/* One legend entry per bank */}
+                <Legend
+                  payload={banks.map(b => ({
+                    value: b.bank,
+                    type: 'square' as const,
+                    color: BANK_COLOR[b.bank] ?? '#94a3b8',
+                  }))}
+                />
+              </PieChart>
+            </ResponsiveContainer>
+          ) : (
+            <Empty>No deposits or withdrawals yet</Empty>
+          )}
         </ChartCard>
       </div>
 
