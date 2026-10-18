@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ArrowDown, ArrowUp, Download } from 'lucide-react'
-import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
+import { Bar, BarChart, CartesianGrid, Cell, Legend, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { PageTitle } from '../components/Layout'
 import { Badge, ChartCard, Empty, HealthBadge, Kpi, Section } from '../components/ui'
 import { compact, fmt } from '../lib/metrics'
@@ -13,6 +13,7 @@ type BrandSel = 'ALL' | Brand
 type Flag = 'all' | 'dpOver' | 'wdOver' | 'near' | 'high' | 'low' | 'breach'
 type Sortable = string | number | null
 
+const BANK_COLOR: Record<string, string> = { BRAC: '#6366f1', CBL: '#10b981', DBBL: '#f59e0b', IBBL: '#0ea5e9' }
 const dash = <span className="text-slate-400">—</span>
 const money = (n: number) => <span className={n < 0 ? 'text-rose-600' : ''}>{fmt(n, 2)}</span>
 const maskAcct = (n: string) => (n.length > 4 ? `••••${n.slice(-4)}` : n)
@@ -237,13 +238,17 @@ export default function BdtLocalBankPage() {
       <div className="grid gap-4 lg:grid-cols-3">
         <div className="lg:col-span-2">
           <ChartCard title="Daily deposit vs withdrawal">
-            {trend.length ? <ResponsiveContainer><BarChart data={trend}><CartesianGrid strokeDasharray="3 3" vertical={false} /><XAxis dataKey="date" fontSize={11} /><YAxis tickFormatter={compact} /><Tooltip formatter={(v: number) => fmt(v, 2)} /><Legend />
-              <Bar dataKey="Deposit" fill="#10b981" radius={[4, 4, 0, 0]} /><Bar dataKey="Withdrawal" fill="#f43f5e" radius={[4, 4, 0, 0]} /></BarChart></ResponsiveContainer> : <Empty>No activity yet</Empty>}
+            {trend.length ? <ResponsiveContainer><LineChart data={trend}><CartesianGrid strokeDasharray="3 3" vertical={false} /><XAxis dataKey="date" fontSize={11} minTickGap={16} /><YAxis tickFormatter={compact} /><Tooltip formatter={(v: number) => fmt(v, 2)} /><Legend />
+              <Line type="monotone" dataKey="Deposit" stroke="#10b981" strokeWidth={2} dot={{ r: 2.5 }} activeDot={{ r: 5 }} /><Line type="monotone" dataKey="Withdrawal" stroke="#f43f5e" strokeWidth={2} dot={{ r: 2.5 }} activeDot={{ r: 5 }} /></LineChart></ResponsiveContainer> : <Empty>No activity yet</Empty>}
           </ChartCard>
         </div>
-        <ChartCard title="Month deposit vs withdrawal per bank">
-          <ResponsiveContainer><BarChart data={banks}><CartesianGrid strokeDasharray="3 3" vertical={false} /><XAxis dataKey="bank" /><YAxis tickFormatter={compact} /><Tooltip formatter={(v: number) => fmt(v, 2)} /><Legend />
-            <Bar dataKey="monthDp" name="Deposit" fill="#10b981" radius={[4, 4, 0, 0]} /><Bar dataKey="monthWd" name="Withdrawal" fill="#f43f5e" radius={[4, 4, 0, 0]} /></BarChart></ResponsiveContainer>
+        <ChartCard title="Month deposit (inner ring) & withdrawal (outer ring) by bank">
+          {k.monthDp + k.monthWd > 0 ? <ResponsiveContainer><PieChart>
+            <Pie data={banks.map(b => ({ name: b.bank, value: b.monthDp }))} dataKey="value" nameKey="name" innerRadius={32} outerRadius={62} paddingAngle={2}>{banks.map(b => <Cell key={b.bank} fill={BANK_COLOR[b.bank] ?? '#94a3b8'} />)}</Pie>
+            <Pie data={banks.map(b => ({ name: b.bank, value: b.monthWd }))} dataKey="value" nameKey="name" innerRadius={70} outerRadius={100} paddingAngle={2}
+              label={(e: { name: string; percent: number }) => `${e.name} ${(e.percent * 100).toFixed(0)}%`} labelLine={false} fontSize={10}>{banks.map(b => <Cell key={b.bank} fill={BANK_COLOR[b.bank] ?? '#94a3b8'} fillOpacity={0.6} />)}</Pie>
+            <Tooltip formatter={(v: number, _n: string, item: { payload?: { name?: string } }) => fmt(v, 2)} /><Legend />
+          </PieChart></ResponsiveContainer> : <Empty>No deposits or withdrawals yet</Empty>}
         </ChartCard>
       </div>
 
