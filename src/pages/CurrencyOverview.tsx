@@ -3,11 +3,16 @@ import { PageTitle } from '../components/Layout'
 import { Kpi } from '../components/ui'
 import { compact, fmt, kpis } from '../lib/metrics'
 import { useData } from '../lib/store'
+import { parseBdtLocalBank } from '../lib/bdtLocalBank'
+import { BDT_LOCALBANK_SHEET } from '../lib/types'
+import { useMemo } from 'react'
 
 export default function CurrencyOverview({ currency }: { currency: string }) {
-  const { rows } = useData()
+  const { rows, dataset, settings } = useData()
+  // BDT Local Bank is not part of `rows` (it has its own sheet layout), so its balance is read from its own parser.
+  const bdtLocal = useMemo(() => (currency === 'BDT' ? parseBdtLocalBank(dataset?.sheets.find(s => s.name === BDT_LOCALBANK_SHEET), settings) : null), [currency, dataset, settings])
   const k = kpis(rows.filter(r => r.currency === currency))
-  const live = [{ name: 'SSG', to: '/currency/bdt/ssg', ready: true }, { name: 'MCG', to: '/currency/bdt/mcg', ready: true }, { name: 'Local Bank', to: '/currency/bdt/local-bank', ready: false }]
+  const live = [{ name: 'SSG', to: '/currency/bdt/ssg', ready: true }, { name: 'MCG', to: '/currency/bdt/mcg', ready: true }, { name: 'Local Bank', to: '/currency/bdt/local-bank', ready: true }]
   return (
     <>
       <PageTitle title={`${currency} Overview`} subtitle="Summary of all payment gateways under this currency" />
@@ -23,7 +28,8 @@ export default function CurrencyOverview({ currency }: { currency: string }) {
           <Link key={g.name} to={g.to} className="card p-5 hover:border-brand-500">
             <div className="text-lg font-semibold">{g.name}</div>
             <div className="text-sm text-slate-500">{g.ready ? 'Live — open the full monitoring view' : 'Coming soon'}</div>
-            {g.ready && <div className="mt-2 text-sm tabular-nums text-slate-700">Running balance {compact(kpis(rows.filter(r => r.currency === currency && r.gateway === g.name)).rBal)}</div>}
+            {g.ready && g.name === 'Local Bank' && bdtLocal && bdtLocal.accounts.length > 0 && <div className="mt-2 text-sm tabular-nums text-slate-700">Running balance {compact(bdtLocal.accounts.reduce((s, a) => s + a.balance, 0))}</div>}
+            {g.ready && g.name !== 'Local Bank' && <div className="mt-2 text-sm tabular-nums text-slate-700">Running balance {compact(kpis(rows.filter(r => r.currency === currency && r.gateway === g.name)).rBal)}</div>}
           </Link>
         ))}
       </div>

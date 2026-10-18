@@ -5,6 +5,7 @@ import DataSources from './pages/DataSources'
 import Executive from './pages/Executive'
 import GatewayPage from './pages/GatewayPage'
 import LocalBankPage from './pages/LocalBankPage'
+import BdtLocalBankPage from './pages/BdtLocalBankPage'
 import SettingsPage from './pages/Settings'
 
 export default function App() {
@@ -19,7 +20,7 @@ export default function App() {
         <Route path="/currency/bdt" element={<CurrencyOverview currency="BDT" />} />
         <Route path="/currency/bdt/ssg" element={<GatewayPage key="ssg" currency="BDT" gateway="SSG" />} />
         <Route path="/currency/bdt/mcg" element={<GatewayPage key="mcg" currency="BDT" gateway="MCG" />} />
-        <Route path="/currency/bdt/local-bank" element={<Placeholder title="BDT · Local Bank" />} />
+        <Route path="/currency/bdt/local-bank" element={<BdtLocalBankPage />} />
         <Route path="/currency/pkr" element={<Placeholder title="PKR Overview" />} />
         <Route path="/currency/pkr/ssg" element={<GatewayPage key="pkr-ssg" currency="PKR" gateway="SSG" />} />
         <Route path="/currency/pkr/bangkok-pay" element={<GatewayPage key="pkr-bkk" currency="PKR" gateway="BKK" />} />

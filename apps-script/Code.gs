@@ -15,15 +15,16 @@
  */
 
 var FOLDER_NAME = 'PaymentOpsMonitor';
-var DATA_SHEETS = ['BDT-SSG-AGENT', 'BDT-SSG-PERSONAL', 'BDT-SSG-VIP', 'BDT-SSG-WITHDRAWAL-ONLY', 'BDT-SSG-PERMANENT-STOP', 'BDT-MCG', 'PKR-SSG', 'PKR-BJ-BKK', 'PKR-JB-BKK', 'PKR-6S-BKK', 'PKR-LOCALBANK'];
+var DATA_SHEETS = ['BDT-SSG-AGENT', 'BDT-SSG-PERSONAL', 'BDT-SSG-VIP', 'BDT-SSG-WITHDRAWAL-ONLY', 'BDT-SSG-PERMANENT-STOP', 'BDT-MCG', 'BDT-LOCALBANK', 'PKR-SSG', 'PKR-BJ-BKK', 'PKR-JB-BKK', 'PKR-6S-BKK', 'PKR-LOCALBANK'];
 // Tabs filled by a script sync (not by Excel import). A full-workbook import must never clear them.
-var SYNCED_SHEETS = ['PKR-SSG', 'PKR-BJ-BKK', 'PKR-JB-BKK', 'PKR-6S-BKK', 'PKR-LOCALBANK'];
+var SYNCED_SHEETS = ['BDT-LOCALBANK', 'PKR-SSG', 'PKR-BJ-BKK', 'PKR-JB-BKK', 'PKR-6S-BKK', 'PKR-LOCALBANK'];
 var BKK_SHEETS = ['PKR-BJ-BKK', 'PKR-JB-BKK', 'PKR-6S-BKK'];
 
 // PKR-SSG is synced into the spreadsheet in ACCTLIST_DESTINATION_SPREADSHEET_ID (defined further down), which can be a
 // different file from the one in SHEET_ID that holds the BDT tabs. Read every tab from the spreadsheet it really lives in.
 function spreadsheetFor_(name) {
   if (BKK_SHEETS.indexOf(name) >= 0) return SpreadsheetApp.openById(BJSM_DESTINATION_SPREADSHEET_ID);
+  if (name === 'BDT-LOCALBANK') return spreadsheet_();
   if (SYNCED_SHEETS.indexOf(name) >= 0) return SpreadsheetApp.openById(ACCTLIST_DESTINATION_SPREADSHEET_ID);
   return spreadsheet_();
 }
@@ -155,7 +156,8 @@ function rows_(sheetName, offset, limit) {
         var total = sh.getLastRow() - 1;
         var n = Math.max(0, Math.min(limit, total - offset));
         var vals = n > 0 ? sh.getRange(2 + offset, 1, n, sh.getLastColumn()).getValues() : [];
-        return { rows: vals.map(cleanRow_) };
+        var tz = dateZoneFor_(sheetName, sh);
+        return { rows: vals.map(function (r) { return cleanRowTz_(r, tz); }) };
       }
       if (sh) return { rows: [] };
     } catch (err) { /* fall through to Drive */ }
@@ -183,6 +185,18 @@ function rows_(sheetName, offset, limit) {
   return { rows: data.rows.slice(offset, offset + limit) };
 }
 
+// BDT-LOCALBANK is copied with each date as midnight in its spreadsheet's time zone (see syncBDTLocalBankMonitoring).
+// Formatting those dates in UTC would show the previous day for a time zone ahead of UTC, so this tab is formatted in its own zone.
+function cleanRowTz_(r, tz) {
+  return r.map(function (v) {
+    if (v instanceof Date) return Utilities.formatDate(v, tz || 'UTC', 'yyyy-MM-dd');
+    return v;
+  });
+}
+function dateZoneFor_(sheetName, sh) {
+  return sheetName === 'BDT-LOCALBANK' ? (sh.getParent().getSpreadsheetTimeZone() || 'UTC') : 'UTC';
+}
+
 function cleanRow_(r) {
   return r.map(function (v) {
     if (v instanceof Date) return Utilities.formatDate(v, 'UTC', 'yyyy-MM-dd');
@@ -194,11 +208,18 @@ function cleanRow_(r) {
 
 // Run once from the Apps Script editor to keep Drive backups fresh without slowing manifest requests.
 function setupBackupTrigger() {
+  // Reinstall the hourly backup trigger without creating duplicates.
   ScriptApp.getProjectTriggers().forEach(function (trigger) {
-    if (trigger.getHandlerFunction() === 'scheduledBackup') ScriptApp.deleteTrigger(trigger);
+    var handler = trigger.getHandlerFunction();
+    if (handler === 'scheduledBackup' || handler === 'cleanupOldDriveFiles') {
+      ScriptApp.deleteTrigger(trigger);
+    }
   });
+
   ScriptApp.newTrigger('scheduledBackup').timeBased().everyHours(1).create();
-  Logger.log('Hourly Drive backup trigger installed.');
+  ScriptApp.newTrigger('cleanupOldDriveFiles').timeBased().everyDays(1).atHour(3).create();
+
+  Logger.log('Hourly Drive backup and daily Drive cleanup triggers installed.');
 }
 
 function scheduledBackup() {
@@ -222,7 +243,8 @@ function backupIfStale_(live) {
       var rowCount = sh.getLastRow() - 1;
       for (var offset = 0, idx = 0; offset < rowCount; offset += BACKUP_ROWS_PER_CHUNK, idx++) {
         var count = Math.min(BACKUP_ROWS_PER_CHUNK, rowCount - offset);
-        var vals = sh.getRange(2 + offset, 1, count, sh.getLastColumn()).getValues().map(cleanRow_);
+        var tz = dateZoneFor_(s.name, sh);
+        var vals = sh.getRange(2 + offset, 1, count, sh.getLastColumn()).getValues().map(function (r) { return cleanRowTz_(r, tz); });
         var name = 'data-' + s.name + '-' + backupId + '-' + idx + '.json';
         writeJson_(name, { sheet: s.name, startRow: offset, rows: vals });
         chunks.push({ name: name, startRow: offset, rowCount: vals.length });
@@ -252,6 +274,88 @@ function trashOldDataFiles_(oldMeta, newSheets) {
     newSheets.forEach(function (s) { if (s.chunks && s.chunks.length) trash_('data-' + s.name + '.json'); });
   } catch (err) { /* cleanup can be retried on a later backup */ }
 }
+
+
+/**
+ * Daily cleanup for orphaned Drive backup files.
+ *
+ * Safety rules:
+ * - Never trash files referenced by the current meta.json.
+ * - Only consider our generated data-*.json and stage-*.json files.
+ * - Only trash unreferenced data backups / abandoned staging files older than 24 hours.
+ * - Use Drive Trash rather than permanent deletion.
+ * - If meta.json is missing or invalid, do not delete data backup files.
+ */
+function cleanupOldDriveFiles() {
+  var STALE_AFTER_MS = 24 * 60 * 60 * 1000;
+  var cutoff = Date.now() - STALE_AFTER_MS;
+  var folder = folder_();
+  var meta = null;
+
+  try {
+    meta = readJson_('meta.json');
+  } catch (err) {
+    console.error('Drive cleanup: could not read meta.json; data backups will be preserved. ' + err);
+  }
+
+  var canCleanDataFiles = !!(meta && Array.isArray(meta.sheets));
+  var keep = {};
+
+  if (canCleanDataFiles) {
+    meta.sheets.forEach(function (sheet) {
+      if (!sheet || !sheet.name) return;
+
+      if (Array.isArray(sheet.chunks) && sheet.chunks.length) {
+        sheet.chunks.forEach(function (chunk) {
+          if (chunk && chunk.name) keep[chunk.name] = true;
+        });
+      } else {
+        // Older backup format: a single JSON file per sheet.
+        keep['data-' + sheet.name + '.json'] = true;
+      }
+    });
+  }
+
+  var trashedData = 0;
+  var trashedStage = 0;
+  var files = folder.getFiles();
+
+  while (files.hasNext()) {
+    var file = files.next();
+    var name = file.getName();
+    var updated = file.getLastUpdated().getTime();
+
+    if (updated >= cutoff) continue;
+
+    // Staged chunks are temporary import data. A 24-hour grace period protects
+    // slow/unfinished imports while eventually cleaning abandoned imports.
+    if (/^stage-[A-Za-z0-9_-]+-.+\.json$/.test(name)) {
+      file.setTrashed(true);
+      trashedStage++;
+      continue;
+    }
+
+    // Do not remove operational backups unless meta.json was read successfully.
+    if (canCleanDataFiles && /^data-.+\.json$/.test(name) && !keep[name]) {
+      file.setTrashed(true);
+      trashedData++;
+    }
+  }
+
+  Logger.log(
+    'Drive cleanup complete. Trashed orphaned data backups: ' + trashedData +
+    '; abandoned staging files: ' + trashedStage +
+    '; data-backup cleanup enabled: ' + canCleanDataFiles + '.'
+  );
+
+  return {
+    ok: true,
+    trashedDataBackups: trashedData,
+    trashedStageFiles: trashedStage,
+    dataBackupCleanupEnabled: canCleanDataFiles
+  };
+}
+
 
 /* ------------------------------ Excel import (chunked, selected-tab aware) ------------------------------ */
 
@@ -1165,6 +1269,83 @@ function setupPKRLocalBankFiveMinuteSync() {
 }
 
 
+
+
+// BDT Local Bank source spreadsheet: MONITORING -> BDT-LOCALBANK in the main SHEET_ID spreadsheet.
+const BDT_LOCALBANK_SOURCE_SPREADSHEET_ID =
+  "1WGMusy36Dt2XHgzCWVLIdTjoQULQdJkrkSqnJvk2Yzg";
+
+function syncBDTLocalBankMonitoring() {
+  const sourceSS = SpreadsheetApp.openById(BDT_LOCALBANK_SOURCE_SPREADSHEET_ID);
+  const source = sourceSS.getSheetByName("MONITORING");
+  const destinationSS = spreadsheet_();
+  const destination = destinationSS.getSheetByName("BDT-LOCALBANK");
+
+  if (!source) throw new Error('Source tab "MONITORING" not found in BDT Local Bank source spreadsheet.');
+  if (!destination) throw new Error('Destination tab "BDT-LOCALBANK" not found in the main spreadsheet configured by SHEET_ID.');
+
+  const sourceRange = source.getDataRange();
+
+  // Preserve each date/time as displayed in the SOURCE spreadsheet timezone.
+  // Directly copying Date objects between spreadsheets with different timezones
+  // can make a date-only value appear as the previous day in the destination.
+  const sourceTimeZone = sourceSS.getSpreadsheetTimeZone() || "Asia/Colombo";
+  const destinationTimeZone = destinationSS.getSpreadsheetTimeZone() || sourceTimeZone;
+  const newValues = sourceRange.getValues().map(function (row) {
+    return row.map(function (value) {
+      if (!(value instanceof Date) || isNaN(value.getTime())) return value;
+      const localDateTime = Utilities.formatDate(value, sourceTimeZone, "yyyy-MM-dd'T'HH:mm:ss");
+      return Utilities.parseDate(localDateTime, destinationTimeZone, "yyyy-MM-dd'T'HH:mm:ss");
+    });
+  });
+  const rows = Math.max(sourceRange.getNumRows(), 1);
+  const cols = Math.max(sourceRange.getNumColumns(), 1);
+
+  if (destination.getMaxRows() < rows) destination.insertRowsAfter(destination.getMaxRows(), rows - destination.getMaxRows());
+  if (destination.getMaxColumns() < cols) destination.insertColumnsAfter(destination.getMaxColumns(), cols - destination.getMaxColumns());
+
+  const oldValues = destination.getDataRange().getValues();
+  const changed = JSON.stringify(oldValues) !== JSON.stringify(newValues);
+
+  const oldRange = destination.getDataRange();
+  oldRange.breakApart();
+  oldRange.clear();
+
+  const targetRange = destination.getRange(1, 1, rows, cols);
+  targetRange.setValues(newValues);
+  targetRange.setBackgrounds(sourceRange.getBackgrounds());
+  targetRange.setFontColors(sourceRange.getFontColors());
+  targetRange.setFontFamilies(sourceRange.getFontFamilies());
+  targetRange.setFontSizes(sourceRange.getFontSizes());
+  targetRange.setFontWeights(sourceRange.getFontWeights());
+  targetRange.setFontStyles(sourceRange.getFontStyles());
+  targetRange.setFontLines(sourceRange.getFontLines());
+  targetRange.setHorizontalAlignments(sourceRange.getHorizontalAlignments());
+  targetRange.setVerticalAlignments(sourceRange.getVerticalAlignments());
+  targetRange.setNumberFormats(sourceRange.getNumberFormats());
+  targetRange.setWraps(sourceRange.getWraps());
+  targetRange.setTextRotations(sourceRange.getTextRotations());
+
+  sourceRange.getMergedRanges().forEach(function (merged) {
+    destination.getRange(merged.getRow(), merged.getColumn(), merged.getNumRows(), merged.getNumColumns()).merge();
+  });
+
+  for (let c = 1; c <= cols; c++) destination.setColumnWidth(c, source.getColumnWidth(c));
+  for (let r = 1; r <= rows; r++) destination.setRowHeight(r, source.getRowHeight(r));
+
+  if (changed) props_().setProperty(sheetRevisionKey_("BDT-LOCALBANK"), String(Date.now()));
+  Logger.log("BDT Local Bank sync completed: " + rows + " rows, " + cols + " columns. Data changed: " + changed);
+}
+
+// Run once to install the five-minute BDT Local Bank sync and perform the initial sync.
+function setupBDTLocalBankFiveMinuteSync() {
+  ScriptApp.getProjectTriggers()
+    .filter(function (trigger) { return trigger.getHandlerFunction() === "syncBDTLocalBankMonitoring"; })
+    .forEach(function (trigger) { ScriptApp.deleteTrigger(trigger); });
+
+  ScriptApp.newTrigger("syncBDTLocalBankMonitoring").timeBased().everyMinutes(5).create();
+  syncBDTLocalBankMonitoring();
+}
 
 
 function testLocalBankL12() {
