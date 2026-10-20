@@ -202,7 +202,7 @@ export default function InrPage() {
       <PageTitle title="INR · Overview" />
       <div className="card p-10 text-center text-slate-500">
         {loading ? 'Loading data…' : !sheet
-          ? <>The <b>{INR_SHEET}</b> data has not been uploaded yet. Download the <b>INR-OVERVIEW</b> tab from the main Google Sheet as CSV (for example <span className="font-mono">MAIN_AN - INR-OVERVIEW.csv</span>) and upload it in <Link className="text-brand-600 underline" to="/admin/data-sources">Admin → Data Sources</Link>. The file name only needs to contain “INR”.</>
+          ? <>The <b>{INR_SHEET}</b> tab has not reached the app yet. It is copied from LATEST BALANCES every 5 minutes by the Apps Script (<span className="font-mono">setupINROverviewFiveMinuteSync</span> must have been run once and the script deployed as a new version). Until then you can download the <b>INR-OVERVIEW</b> tab from the main Google Sheet as CSV (for example <span className="font-mono">MAIN_AN - INR-OVERVIEW.csv</span>) and upload it in <Link className="text-brand-600 underline" to="/admin/data-sources">Admin → Data Sources</Link> (the file name only needs to contain “INR”).</>
           : 'The file was loaded but no INR merchant balances or Total WD Balance table were recognised.'}
         {sheet && data.problems.length > 0 && <div className="mx-auto mt-4 max-w-3xl rounded-lg bg-amber-50 p-3 text-left text-xs text-amber-800">{data.problems.map(p => <div key={p}>{p}</div>)}</div>}
       </div>

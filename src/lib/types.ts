@@ -53,7 +53,7 @@ export const SYNCED_SHEETS = ['PKR-SSG', 'PKR-BJ-BKK', 'PKR-JB-BKK', 'PKR-6S-BKK
 
 /**
  * INR overview: values-only copy of the INR-OVERVIEW tab (merchant balances per brand + each brand's Total WD Balance).
- * Uploaded as a CSV/Excel file in Admin → Data Sources; read by src/lib/inr.ts, not by normalize() (not in SHEET_GROUP).
+ * Copied from LATEST BALANCES every 5 minutes by the Apps Script (syncINROverview); a CSV/Excel upload in Admin → Data Sources is the fallback; read by src/lib/inr.ts, not by normalize() (not in SHEET_GROUP).
  * INR Local Bank is permanently closed and is deliberately ignored.
  */
 export const INR_SHEET = 'INR-OVERVIEW'

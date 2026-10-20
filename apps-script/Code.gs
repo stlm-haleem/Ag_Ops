@@ -17,17 +17,15 @@
 var FOLDER_NAME = 'PaymentOpsMonitor';
 var DATA_SHEETS = ['BDT-SSG-AGENT', 'BDT-SSG-PERSONAL', 'BDT-SSG-VIP', 'BDT-SSG-WITHDRAWAL-ONLY', 'BDT-SSG-PERMANENT-STOP', 'BDT-MCG', 'BDT-LOCALBANK', 'PKR-SSG', 'PKR-BJ-BKK', 'PKR-JB-BKK', 'PKR-6S-BKK', 'PKR-LOCALBANK', 'INR-OVERVIEW'];
 // Tabs filled by a script sync (not by Excel import). A full-workbook import must never clear them.
-var SYNCED_SHEETS = ['BDT-LOCALBANK', 'PKR-SSG', 'PKR-BJ-BKK', 'PKR-JB-BKK', 'PKR-6S-BKK', 'PKR-LOCALBANK'];
-// Tabs that are only ever filled by uploading a CSV / Excel file in the app (INR-OVERVIEW). A full-workbook import that does not
-// contain them must leave them alone, exactly like the synced tabs.
-var UPLOAD_ONLY_SHEETS = ['INR-OVERVIEW'];
+var SYNCED_SHEETS = ['BDT-LOCALBANK', 'PKR-SSG', 'PKR-BJ-BKK', 'PKR-JB-BKK', 'PKR-6S-BKK', 'PKR-LOCALBANK', 'INR-OVERVIEW'];
 var BKK_SHEETS = ['PKR-BJ-BKK', 'PKR-JB-BKK', 'PKR-6S-BKK'];
 
 // PKR-SSG is synced into the spreadsheet in ACCTLIST_DESTINATION_SPREADSHEET_ID (defined further down), which can be a
 // different file from the one in SHEET_ID that holds the BDT tabs. Read every tab from the spreadsheet it really lives in.
 function spreadsheetFor_(name) {
   if (BKK_SHEETS.indexOf(name) >= 0) return SpreadsheetApp.openById(BJSM_DESTINATION_SPREADSHEET_ID);
-  if (name === 'BDT-LOCALBANK') return spreadsheet_();
+  // BDT-LOCALBANK and INR-OVERVIEW (syncINROverview) live in the main spreadsheet.
+  if (name === 'BDT-LOCALBANK' || name === 'INR-OVERVIEW') return spreadsheet_();
   if (SYNCED_SHEETS.indexOf(name) >= 0) return SpreadsheetApp.openById(ACCTLIST_DESTINATION_SPREADSHEET_ID);
   return spreadsheet_();
 }
@@ -502,7 +500,6 @@ function importCommit_(b) {
     DATA_SHEETS.forEach(function (name) {
       if (newDescriptors.some(function (s) { return s.name === name; })) return;
       if (SYNCED_SHEETS.indexOf(name) >= 0) return; // filled by a script sync, not by Excel imports
-      if (UPLOAD_ONLY_SHEETS.indexOf(name) >= 0) return; // filled only by its own CSV upload (INR-OVERVIEW)
       var sh = spreadsheet_().getSheetByName(name);
       if (sh) sh.clearContents();
       trash_('data-' + name + '.json');
@@ -1288,16 +1285,30 @@ function syncBDTLocalBankMonitoring() {
   if (!source) throw new Error('Source tab "MONITORING" not found in BDT Local Bank source spreadsheet.');
   if (!destination) throw new Error('Destination tab "BDT-LOCALBANK" not found in the main spreadsheet configured by SHEET_ID.');
 
-  const sourceRange = source.getDataRange();
+  // Ensure pending source-sheet calculations are applied before reading the records.
+  SpreadsheetApp.flush();
 
-  // Preserve each date/time as displayed in the SOURCE spreadsheet timezone.
-  // Directly copying Date objects between spreadsheets with different timezones
-  // can make a date-only value appear as the previous day in the destination.
+  const sourceRange = source.getDataRange();
+  const sourceValues = sourceRange.getValues();
+  const sourceFormats = sourceRange.getNumberFormats();
+
+  // Preserve the source calendar date when copying date-only cells between
+  // spreadsheets with different time zones. Noon is used for date-only values
+  // to prevent midnight timezone conversion from displaying the previous day.
   const sourceTimeZone = sourceSS.getSpreadsheetTimeZone() || "Asia/Colombo";
   const destinationTimeZone = destinationSS.getSpreadsheetTimeZone() || sourceTimeZone;
-  const newValues = sourceRange.getValues().map(function (row) {
-    return row.map(function (value) {
+  const newValues = sourceValues.map(function (row, rowIndex) {
+    return row.map(function (value, colIndex) {
       if (!(value instanceof Date) || isNaN(value.getTime())) return value;
+
+      const numberFormat = String(sourceFormats[rowIndex][colIndex] || "");
+      const hasTime = /[hHsS]/.test(numberFormat);
+
+      if (!hasTime) {
+        const sourceDate = Utilities.formatDate(value, sourceTimeZone, "yyyy-MM-dd");
+        return Utilities.parseDate(sourceDate + " 12:00:00", destinationTimeZone, "yyyy-MM-dd HH:mm:ss");
+      }
+
       const localDateTime = Utilities.formatDate(value, sourceTimeZone, "yyyy-MM-dd'T'HH:mm:ss");
       return Utilities.parseDate(localDateTime, destinationTimeZone, "yyyy-MM-dd'T'HH:mm:ss");
     });
@@ -1352,40 +1363,86 @@ function setupBDTLocalBankFiveMinuteSync() {
 }
 
 
-function testLocalBankL12() {
-  const ss = SpreadsheetApp.openById(
-    "1fUF513D2mxIAaqtb7M5DsTUjrnVgS_SrqYaXKS2Twks"
-  );
+// INR balances source: LATEST BALANCES -> INR-OVERVIEW in the main spreadsheet.
+const INR_BALANCES_SOURCE_SPREADSHEET_ID = "1l61GdmpG2Y9-q1xBz3Jy8Yo_t9-R5JCJjDpmzThllN8";
 
-  const sheet = ss.getSheetByName("MONITORING");
+/**
+ * Copies the LATEST BALANCES tab into INR-OVERVIEW.
+ * Values and the source tab's formatting, merged cells, column widths and row heights are copied.
+ */
+function syncINROverview() {
+  const sourceSS = SpreadsheetApp.openById(INR_BALANCES_SOURCE_SPREADSHEET_ID);
+  const source = sourceSS.getSheetByName("LATEST BALANCES");
+  const destinationSS = spreadsheet_();
+  let destination = destinationSS.getSheetByName("INR-OVERVIEW");
+
+  if (!source) throw new Error('Source tab "LATEST BALANCES" not found.');
+  if (!destination) destination = destinationSS.insertSheet("INR-OVERVIEW");
 
   SpreadsheetApp.flush();
-  Utilities.sleep(2000);
 
-  const cell = sheet.getRange("L12");
+  const sourceRange = source.getDataRange();
+  const values = sourceRange.getValues();
+  const rows = Math.max(sourceRange.getNumRows(), 1);
+  const cols = Math.max(sourceRange.getNumColumns(), 1);
 
-  Logger.log("Formula: " + cell.getFormula());
-  Logger.log("Raw value: " + cell.getValue());
-  Logger.log("Displayed value: " + cell.getDisplayValue());
-  Logger.log("Spreadsheet timezone: " + ss.getSpreadsheetTimeZone());
+  if (destination.getMaxRows() < rows) {
+    destination.insertRowsAfter(destination.getMaxRows(), rows - destination.getMaxRows());
+  }
+  if (destination.getMaxColumns() < cols) {
+    destination.insertColumnsAfter(destination.getMaxColumns(), cols - destination.getMaxColumns());
+  }
+
+  // Remove the old layout so removed source rows/columns and old merged cells do not remain.
+  const oldRange = destination.getDataRange();
+  oldRange.breakApart();
+  oldRange.clear();
+
+  const targetRange = destination.getRange(1, 1, rows, cols);
+  targetRange.setValues(values);
+  targetRange.setBackgrounds(sourceRange.getBackgrounds());
+  targetRange.setFontColors(sourceRange.getFontColors());
+  targetRange.setFontFamilies(sourceRange.getFontFamilies());
+  targetRange.setFontSizes(sourceRange.getFontSizes());
+  targetRange.setFontWeights(sourceRange.getFontWeights());
+  targetRange.setFontStyles(sourceRange.getFontStyles());
+  targetRange.setFontLines(sourceRange.getFontLines());
+  targetRange.setHorizontalAlignments(sourceRange.getHorizontalAlignments());
+  targetRange.setVerticalAlignments(sourceRange.getVerticalAlignments());
+  targetRange.setNumberFormats(sourceRange.getNumberFormats());
+  targetRange.setWraps(sourceRange.getWraps());
+  targetRange.setTextRotations(sourceRange.getTextRotations());
+
+  sourceRange.getMergedRanges().forEach(function (merged) {
+    destination.getRange(
+      merged.getRow(), merged.getColumn(), merged.getNumRows(), merged.getNumColumns()
+    ).merge();
+  });
+
+  for (let c = 1; c <= cols; c++) {
+    destination.setColumnWidth(c, source.getColumnWidth(c));
+  }
+  for (let r = 1; r <= rows; r++) {
+    destination.setRowHeight(r, source.getRowHeight(r));
+  }
+
+  Logger.log("LATEST BALANCES -> INR-OVERVIEW sync completed: " + rows + " rows, " + cols + " columns.");
 }
 
+// Run once to install the five-minute trigger and perform the initial copy.
+function setupINROverviewFiveMinuteSync() {
+  ScriptApp.getProjectTriggers()
+    .filter(function (trigger) {
+      return trigger.getHandlerFunction() === "syncINROverview";
+    })
+    .forEach(function (trigger) {
+      ScriptApp.deleteTrigger(trigger);
+    });
 
-function checkLocalBankTimezones() {
-  const ss = SpreadsheetApp.openById(
-    "1fUF513D2mxIAaqtb7M5DsTUjrnVgS_SrqYaXKS2Twks"
-  );
+  ScriptApp.newTrigger("syncINROverview")
+    .timeBased()
+    .everyMinutes(5)
+    .create();
 
-  Logger.log("Spreadsheet timezone: " + ss.getSpreadsheetTimeZone());
-  Logger.log("Script timezone: " + Session.getScriptTimeZone());
-
-  Logger.log(
-    "Spreadsheet date: " +
-    Utilities.formatDate(new Date(), ss.getSpreadsheetTimeZone(), "yyyy-MM-dd")
-  );
-
-  Logger.log(
-    "Sri Lanka date: " +
-    Utilities.formatDate(new Date(), "Asia/Colombo", "yyyy-MM-dd")
-  );
+  syncINROverview();
 }
