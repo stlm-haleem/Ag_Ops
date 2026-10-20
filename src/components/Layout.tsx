@@ -39,7 +39,7 @@ export default function Layout({ children }: { children: ReactNode }) {
   )
   return (
     <div className="flex min-h-screen">
-      <aside className="sticky top-0 hidden h-screen w-64 shrink-0 flex-col overflow-y-auto bg-slate-900 p-3 md:flex">
+      <aside className="sticky top-0 hidden h-screen print:hidden w-64 shrink-0 flex-col overflow-y-auto bg-slate-900 p-3 md:flex">
         <div className="px-3 py-3 text-base font-semibold text-white">Payment Ops Monitor</div>
         <nav className="mt-2 space-y-1">
           <NavLink to="/" end className={link}><LayoutDashboard size={16} />Executive Dashboard</NavLink>
@@ -65,7 +65,7 @@ export default function Layout({ children }: { children: ReactNode }) {
             <NavLink to="/currency/pkr/local-bank" className={sub}>Local Bank</NavLink>
           </Group>
           <Group icon={<Globe2 size={16} />} label="INR" match="/currency/inr">
-            <NavLink to="/currency/inr" end className={sub}>Coming soon</NavLink>
+            <NavLink to="/currency/inr" end className={sub}>Overview</NavLink>
           </Group>
 
           <div className="pt-4" />
@@ -86,7 +86,7 @@ export default function Layout({ children }: { children: ReactNode }) {
       </aside>
       <main className="min-w-0 flex-1">
         {/* Mobile header and full navigation drawer */}
-        <header className="mobile-header md:hidden">
+        <header className="mobile-header md:hidden print:hidden">
           <button type="button" className="mobile-menu-button" aria-label={mobileOpen ? 'Close navigation' : 'Open navigation'} aria-expanded={mobileOpen} onClick={() => setMobileOpen(v => !v)}>
             {mobileOpen ? <X size={21} /> : <Menu size={21} />}
           </button>
@@ -118,7 +118,7 @@ export default function Layout({ children }: { children: ReactNode }) {
             <NavLink to="/currency/pkr/ssg" onClick={() => setMobileOpen(false)} className={link}>PKR · SSG</NavLink>
             <NavLink to="/currency/pkr/bangkok-pay" onClick={() => setMobileOpen(false)} className={link}>PKR · Bangkok-Pay</NavLink>
             <NavLink to="/currency/pkr/local-bank" onClick={() => setMobileOpen(false)} className={link}>PKR · Local Bank</NavLink>
-            <NavLink to="/currency/inr" onClick={() => setMobileOpen(false)} className={link}><Globe2 size={16} />INR</NavLink>
+            <NavLink to="/currency/inr" onClick={() => setMobileOpen(false)} className={link}><Globe2 size={16} />INR Overview</NavLink>
             <div className="mobile-nav-section">Reports & Admin</div>
             <NavLink to="/reports" onClick={() => setMobileOpen(false)} className={link}><FileText size={16} />Reports</NavLink>
             <NavLink to="/admin/data-sources" onClick={() => setMobileOpen(false)} className={link}><Database size={16} />Data Sources / Import</NavLink>
@@ -153,8 +153,8 @@ export function Placeholder({ title, note }: { title: string; note?: string }) {
       <PageTitle title={title} />
       <div className="card flex flex-col items-center justify-center gap-2 p-16 text-center">
         <BarChart3 className="text-slate-300" size={40} />
-        <div className="font-medium text-slate-600">Coming soon</div>
-        <div className="max-w-md text-sm text-slate-400">{note ?? 'This page is a placeholder. We are starting with BDT-SSG; the rest will follow the same structure.'}</div>
+        <div className="font-medium text-slate-600">Nothing here</div>
+        <div className="max-w-md text-sm text-slate-400">{note ?? 'This page does not exist. Use the menu to open one of the monitoring pages.'}</div>
       </div>
     </>
   )

@@ -108,3 +108,9 @@ input, select, textarea { min-width: 0; }
   .page-content .card.p-4,
   .page-content .card.p-5 { padding: 11px; }
 }
+
+@media print {
+  aside, .mobile-header { display: none !important; }
+  .card { box-shadow: none; break-inside: avoid; }
+  .page-content { max-width: none !important; padding: 0 !important; }
+}

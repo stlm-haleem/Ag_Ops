@@ -7,6 +7,7 @@ export default function SettingsPage() {
   const { settings, updateSettings } = useData()
   const [draft, setDraft] = useState<Settings>(structuredClone(settings))
   const [saved, setSaved] = useState(false)
+  const [syncFailed, setSyncFailed] = useState(false)
   const set = (g: (typeof GROUPS)[number], k: 'low' | 'discrep' | 'high', v: string) => { setSaved(false); setDraft(d => ({ ...d, thresholds: { ...d.thresholds, [g]: { ...d.thresholds[g], [k]: Number(v) || 0 } } })) }
   const setGw = (key: string, v: string) => { setSaved(false); setDraft(d => ({ ...d, gatewayBalance: { ...d.gatewayBalance, [key]: { high: Math.max(0, Number(v) || 0) } } })) }
 
@@ -51,12 +52,14 @@ export default function SettingsPage() {
         <div><b>PKR BKK</b> (BAJI, JEETBUZZ, SIX6S) has no actual balance, so there is no discrepancy. Running balance = Opening + Total deposit − Withdrawal − STLM/SPC − Top up. Higher balance = running balance above the account's SDP; with no SDP, the brand's own “Higher balance” threshold above is used. Limit exceeded comes from the sheet's EXCEED column.</div>
         <div><b>PKR Local Bank</b> (banks only, no e-wallets) is read from the MONITORING sheet. Closing balance comes from the sheet. Higher balance = an <i>active</i> account whose closing balance is above its security deposit; with no security deposit, the “Higher balance” threshold above is used. Low balance = an active account below the low threshold. Stopped accounts are not rated. “Today DP / WD” are the sheet's today totals (the sheet's “DP / WD ACCUMULATED” columns). Limit exceeded = today's DP or WD above the account's daily limit. Operation time is read as Philippines time (PHT, UTC+8) or Pakistan time (PKT, UTC+5); a time the app cannot read with certainty is shown as “Hours unclear”.</div>
         <div><b>BDT Local Bank</b> (BAJI and JEETBUZZ) is read from the MONITORING sheet. Higher / low balance use the two thresholds above, which you set by hand (0 = off), against each account's Running Balance. DP / WD limits are daily limits: “exceeded” compares today's column with the limit, and “near limit” is 80% or more of it. Operation hours (TIME DP / TIME WD) and “today” are in Sri Lanka time.</div>
+        <div><b>INR</b> (BAJI, JEETBUZZ, SIX6S) thresholds are typed by hand directly on the INR page: a Low and a High limit for each brand's Total WD balance, and optionally for each merchant line. They are saved with the other settings and shared across devices; 0 or blank turns that limit off.</div>
         <div>All accounts are counted in the KPIs (logged in, logged out and locked). Critical is intentionally not flagged yet.</div>
       </div>
       <div className="flex items-center gap-3">
-        <button className="btn-primary" onClick={async () => { await updateSettings(draft); setSaved(true) }}>Save thresholds</button>
-        <button className="btn" onClick={() => { setDraft(structuredClone(DEFAULT_SETTINGS)); setSaved(false) }}>Reset to defaults</button>
-        {saved && <span className="text-sm text-emerald-600">Saved</span>}
+        <button className="btn-primary" onClick={async () => { const r = await updateSettings(draft); setSyncFailed(!r.synced); setSaved(true) }}>Save thresholds</button>
+        <button className="btn" onClick={() => { setDraft({ ...structuredClone(DEFAULT_SETTINGS), inr: structuredClone(settings.inr) }); setSaved(false) }}>Reset to defaults</button>
+        {saved && !syncFailed && <span className="text-sm text-emerald-600">Saved</span>}
+        {saved && syncFailed && <span className="text-sm text-amber-700">Saved in this browser only: the server could not be reached.</span>}
       </div>
     </>
   )

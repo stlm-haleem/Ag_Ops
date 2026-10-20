@@ -17,7 +17,7 @@ const statusCell = (v: string) => v ? <Badge tone={walletTone(v)}>{v}</Badge> : 
 
 const money = (n: number) => <span className={n < 0 ? 'text-rose-600' : ''}>{fmt(n, 2)}</span>
 
-export default function AgentTable({ rows, showType, flag, onFlag, gateway, currency }: { rows: AgentRow[]; showType: boolean; flag: Flag; onFlag: (f: Flag) => void; gateway?: string; currency?: string }) {
+export default function AgentTable({ rows, showType, flag, onFlag, gateway, currency, showScope }: { rows: AgentRow[]; showType: boolean; flag: Flag; onFlag: (f: Flag) => void; gateway?: string; currency?: string; showScope?: boolean }) {
   const isMcg = gateway === 'MCG'
   const isPkr = currency === 'PKR' && gateway === 'SSG'
   const isBkk = gateway === 'BKK'
@@ -105,8 +105,11 @@ export default function AgentTable({ rows, showType, flag, onFlag, gateway, curr
     ...wal('Withdrawal by wallet', ['wdJazz', 'wdUpaisa', 'wdNaya'], true),
   ]
   const PKR_ONLY: string[] = ['unconfirmedWd', 'charge', 'commission', 'topUp', 'sdpPaid', 'whrs']
+  // "All agents" page: rows from several currencies / gateways, so say which one each row belongs to.
+  const scopeCols: Col[] = showScope ? [{ key: 'currency', label: 'Currency' }, { key: 'gateway', label: 'Gateway', render: r => (r.gateway === 'BKK' ? 'Bangkok-Pay' : r.gateway) }] : []
   const visible = isBkk ? bkkCols.filter(c => showType || !c.hideInGroup) : cols.filter(c => (showType || !c.hideInGroup) &&
     (isPkr ? c.key !== 'mrcLmt' : !PKR_ONLY.includes(c.key as string) && (isMcg ? c.key !== 'utilizedLimit' && c.key !== 'limitStatus' : c.key !== 'code')))
+    .flatMap((c, i) => (i === 0 ? [c, ...scopeCols] : [c]))
 
   const exportCsv = () => {
     const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`

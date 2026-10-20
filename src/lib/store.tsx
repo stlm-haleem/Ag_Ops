@@ -2,7 +2,7 @@ import { createContext, ReactNode, useCallback, useContext, useEffect, useMemo, 
 import * as api from './api'
 import { parseExcel } from './excel'
 import { normalize } from './normalize'
-import { AgentRow, AnalyticsEntry, DEFAULT_SETTINGS, Dataset, SYNCED_SHEETS, Settings } from './types'
+import { AgentRow, AnalyticsEntry, DEFAULT_INR_SETTINGS, DEFAULT_SETTINGS, Dataset, INR_SHEET, SYNCED_SHEETS, Settings } from './types'
 
 interface Ctx {
   dataset: Dataset | null
@@ -19,7 +19,8 @@ interface Ctx {
   refresh: () => Promise<void>
   importExcel: (f: File) => Promise<{ uploaded: boolean; message: string }>
   switchToSheet: () => Promise<void>
-  updateSettings: (s: Settings) => Promise<void>
+  /** synced = false when the server copy could not be written (the browser copy still applies). */
+  updateSettings: (s: Settings) => Promise<{ synced: boolean }>
   addAnalytics: (e: AnalyticsEntry[]) => Promise<void>
 }
 
@@ -30,6 +31,7 @@ const SETTINGS_KEY = 'settings-v1'
 const mergeSettings = (s?: Partial<Settings>): Settings => ({
   thresholds: { ...DEFAULT_SETTINGS.thresholds, ...(s?.thresholds ?? {}) },
   gatewayBalance: { ...DEFAULT_SETTINGS.gatewayBalance, ...(s?.gatewayBalance ?? {}) },
+  inr: { brands: { ...DEFAULT_INR_SETTINGS.brands, ...(s?.inr?.brands ?? {}) }, merchants: { ...(s?.inr?.merchants ?? {}) } },
 })
 const readLocalSettings = (): Settings | null => { try { const v = localStorage.getItem(SETTINGS_KEY); return v ? mergeSettings(JSON.parse(v)) : null } catch { return null } }
 
@@ -61,7 +63,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       setDataset(ds)
       await api.cacheDataset(ds)
       setBackendOk(true)
-      if (ds.settings?.thresholds || ds.settings?.gatewayBalance) setSettings(mergeSettings(ds.settings))
+      if (ds.settings?.thresholds || ds.settings?.gatewayBalance || ds.settings?.inr) setSettings(mergeSettings(ds.settings))
     } catch (e: any) {
       setBackendOk(false)
       if (e?.status === 401) {
@@ -131,10 +133,11 @@ export function DataProvider({ children }: { children: ReactNode }) {
       // A named single-sheet import replaces only its matching tab in the local view;
       // a full workbook import replaces the complete operational dataset. Daily analytics
       // are always preserved independently of operational imports.
-      // Tabs synced by Apps Script (PKR-SSG) are never touched by a full-workbook import.
+      // Tabs synced by Apps Script (PKR-SSG) and the upload-only INR tab are never touched by a full-workbook import
+      // unless that workbook itself contains them.
       const mergedSheets = parsed.importTargetSheet && dataset
         ? [...dataset.sheets.filter(s => s.name !== parsed.importTargetSheet), ...parsed.sheets]
-        : [...(dataset?.sheets.filter(s => SYNCED_SHEETS.includes(s.name) && !parsed.sheets.some(p => p.name === s.name)) ?? []), ...parsed.sheets]
+        : [...(dataset?.sheets.filter(s => (SYNCED_SHEETS.includes(s.name) || s.name === INR_SHEET) && !parsed.sheets.some(p => p.name === s.name)) ?? []), ...parsed.sheets]
       const next: Dataset = {
         ...parsed,
         source: 'excel',
@@ -172,7 +175,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const updateSettings = useCallback(async (s: Settings) => {
     setSettings(s)
     try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)) } catch { /* ignore */ }
-    try { await api.saveSettings(s) } catch { /* local copy still applies */ }
+    try { await api.saveSettings(s); return { synced: true } } catch { return { synced: false } /* local copy still applies */ }
   }, [])
 
   const addAnalytics = useCallback(async (entries: AnalyticsEntry[]) => {

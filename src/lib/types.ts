@@ -51,6 +51,27 @@ export const LOCALBANK_SHEET = 'PKR-LOCALBANK'
 export const BDT_LOCALBANK_SHEET = 'BDT-LOCALBANK'
 export const SYNCED_SHEETS = ['PKR-SSG', 'PKR-BJ-BKK', 'PKR-JB-BKK', 'PKR-6S-BKK', LOCALBANK_SHEET, BDT_LOCALBANK_SHEET]
 
+/**
+ * INR overview: values-only copy of the INR-OVERVIEW tab (merchant balances per brand + each brand's Total WD Balance).
+ * Uploaded as a CSV/Excel file in Admin → Data Sources; read by src/lib/inr.ts, not by normalize() (not in SHEET_GROUP).
+ * INR Local Bank is permanently closed and is deliberately ignored.
+ */
+export const INR_SHEET = 'INR-OVERVIEW'
+export type InrBrand = 'BAJI' | 'JEETBUZZ' | 'SIX6S'
+export const INR_BRANDS: InrBrand[] = ['BAJI', 'JEETBUZZ', 'SIX6S']
+/** 0 = that alert is off. */
+export interface InrLimits { low: number; high: number }
+export interface InrSettings {
+  /** Low / high limit for each brand's Total WD Balance. */
+  brands: Record<InrBrand, InrLimits>
+  /** Optional low / high limit per merchant line, keyed `${brand}|${merchant}|${code}`. */
+  merchants: Record<string, InrLimits>
+}
+export const DEFAULT_INR_SETTINGS: InrSettings = {
+  brands: { BAJI: { low: 0, high: 0 }, JEETBUZZ: { low: 0, high: 0 }, SIX6S: { low: 0, high: 0 } },
+  merchants: {},
+}
+
 export type Health = 'low' | 'high' | 'healthy'
 /** SSG (BDT and PKR): Logged In / Logged Out / Locked. MCG: Active / Disabled / Suspended / Inactive / Locked. */
 export type LoginState = string
@@ -137,6 +158,8 @@ export interface Settings {
   thresholds: Record<Group, Threshold>
   /** Total running-balance threshold per gateway, keyed like 'BDT-SSG'. high = 0 means not set. */
   gatewayBalance: Record<string, { high: number }>
+  /** INR thresholds, entered by hand on the INR page. */
+  inr: InrSettings
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -160,4 +183,5 @@ export const DEFAULT_SETTINGS: Settings = {
     BDT_LOCAL_BANK: { low: 0, high: 0, discrep: 0 },
   },
   gatewayBalance: { 'BDT-SSG': { high: 0 }, 'BDT-MCG': { high: 0 }, 'PKR-SSG': { high: 0 }, 'PKR-BKK': { high: 0 } },
+  inr: DEFAULT_INR_SETTINGS,
 }

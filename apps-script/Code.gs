@@ -15,9 +15,12 @@
  */
 
 var FOLDER_NAME = 'PaymentOpsMonitor';
-var DATA_SHEETS = ['BDT-SSG-AGENT', 'BDT-SSG-PERSONAL', 'BDT-SSG-VIP', 'BDT-SSG-WITHDRAWAL-ONLY', 'BDT-SSG-PERMANENT-STOP', 'BDT-MCG', 'BDT-LOCALBANK', 'PKR-SSG', 'PKR-BJ-BKK', 'PKR-JB-BKK', 'PKR-6S-BKK', 'PKR-LOCALBANK'];
+var DATA_SHEETS = ['BDT-SSG-AGENT', 'BDT-SSG-PERSONAL', 'BDT-SSG-VIP', 'BDT-SSG-WITHDRAWAL-ONLY', 'BDT-SSG-PERMANENT-STOP', 'BDT-MCG', 'BDT-LOCALBANK', 'PKR-SSG', 'PKR-BJ-BKK', 'PKR-JB-BKK', 'PKR-6S-BKK', 'PKR-LOCALBANK', 'INR-OVERVIEW'];
 // Tabs filled by a script sync (not by Excel import). A full-workbook import must never clear them.
 var SYNCED_SHEETS = ['BDT-LOCALBANK', 'PKR-SSG', 'PKR-BJ-BKK', 'PKR-JB-BKK', 'PKR-6S-BKK', 'PKR-LOCALBANK'];
+// Tabs that are only ever filled by uploading a CSV / Excel file in the app (INR-OVERVIEW). A full-workbook import that does not
+// contain them must leave them alone, exactly like the synced tabs.
+var UPLOAD_ONLY_SHEETS = ['INR-OVERVIEW'];
 var BKK_SHEETS = ['PKR-BJ-BKK', 'PKR-JB-BKK', 'PKR-6S-BKK'];
 
 // PKR-SSG is synced into the spreadsheet in ACCTLIST_DESTINATION_SPREADSHEET_ID (defined further down), which can be a
@@ -499,6 +502,7 @@ function importCommit_(b) {
     DATA_SHEETS.forEach(function (name) {
       if (newDescriptors.some(function (s) { return s.name === name; })) return;
       if (SYNCED_SHEETS.indexOf(name) >= 0) return; // filled by a script sync, not by Excel imports
+      if (UPLOAD_ONLY_SHEETS.indexOf(name) >= 0) return; // filled only by its own CSV upload (INR-OVERVIEW)
       var sh = spreadsheet_().getSheetByName(name);
       if (sh) sh.clearContents();
       trash_('data-' + name + '.json');
