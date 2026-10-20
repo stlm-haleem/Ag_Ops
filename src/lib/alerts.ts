@@ -65,10 +65,16 @@ export function buildOps(rows: AgentRow[], dataset: Dataset | null, settings: Se
     }
     // INR (thresholds are entered by hand on the INR page)
     for (const b of parseInr(dataset.sheets.find(s => s.name === INR_SHEET), settings.inr).brands) {
-      const base = { currency: 'INR', gateway: 'Brand total', brand: b.brand, name: `${b.brand} · Total WD balance`, balance: b.wdBalance, to: '/currency/inr' }
-      if (b.status === 'low') out.push({ ...base, id: `inr|${b.brand}|low`, kind: 'low', detail: `Below the Low limit (${b.limits.low.toLocaleString('en-US')})` })
-      if (b.status === 'high') out.push({ ...base, id: `inr|${b.brand}|high`, kind: 'high', detail: `Above the High limit (${b.limits.high.toLocaleString('en-US')})` })
-      if (b.status === 'error') out.push({ ...base, id: `inr|${b.brand}|error`, kind: 'error', detail: b.wdFound ? `The sheet shows ${b.wdError} for this amount` : 'Not found in the Total WD Balance table' })
+      const metrics = [
+        { label: 'Total available balance', value: b.availableTotal as number | null, status: b.availableStatus, lim: b.availableLimits, tag: 'avail' },
+        { label: 'Total WD balance', value: b.wdBalance, status: b.status, lim: b.limits, tag: 'wd' },
+      ]
+      for (const m of metrics) {
+        const base = { currency: 'INR', gateway: 'Brand total', brand: b.brand, name: `${b.brand} · ${m.label}`, balance: m.value, to: '/currency/inr' }
+        if (m.status === 'low') out.push({ ...base, id: `inr|${b.brand}|${m.tag}|low`, kind: 'low', detail: `Below the Low limit (${m.lim.low.toLocaleString('en-US')})` })
+        if (m.status === 'high') out.push({ ...base, id: `inr|${b.brand}|${m.tag}|high`, kind: 'high', detail: `Above the High limit (${m.lim.high.toLocaleString('en-US')})` })
+        if (m.status === 'error' && m.tag === 'wd') out.push({ ...base, id: `inr|${b.brand}|error`, kind: 'error', detail: b.wdFound ? `The sheet shows ${b.wdError} for this amount` : 'Not found in the Total WD Balance table' })
+      }
       for (const l of b.lines) {
         const m = { currency: 'INR', gateway: 'Merchant', brand: b.brand, name: `${b.brand} · ${l.merchant}${l.code && l.code !== '-' ? ` (${l.code})` : ''}`, balance: l.balance, to: '/currency/inr' }
         if (l.status === 'low') out.push({ ...m, id: `inr|${l.key}|low`, kind: 'low', detail: `Below the Low limit (${l.limits.low.toLocaleString('en-US')})` })

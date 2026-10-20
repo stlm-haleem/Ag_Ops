@@ -31,7 +31,7 @@ const SETTINGS_KEY = 'settings-v1'
 const mergeSettings = (s?: Partial<Settings>): Settings => ({
   thresholds: { ...DEFAULT_SETTINGS.thresholds, ...(s?.thresholds ?? {}) },
   gatewayBalance: { ...DEFAULT_SETTINGS.gatewayBalance, ...(s?.gatewayBalance ?? {}) },
-  inr: { brands: { ...DEFAULT_INR_SETTINGS.brands, ...(s?.inr?.brands ?? {}) }, merchants: { ...(s?.inr?.merchants ?? {}) } },
+  inr: { brands: { ...DEFAULT_INR_SETTINGS.brands, ...(s?.inr?.brands ?? {}) }, available: { ...DEFAULT_INR_SETTINGS.available, ...(s?.inr?.available ?? {}) }, merchants: { ...(s?.inr?.merchants ?? {}) } },
 })
 const readLocalSettings = (): Settings | null => { try { const v = localStorage.getItem(SETTINGS_KEY); return v ? mergeSettings(JSON.parse(v)) : null } catch { return null } }
 

@@ -42,6 +42,11 @@ export interface InrBrandSummary {
   /** lineTotal − wdBalance: the part of the merchant balance the sheet leaves out of Total WD Balance. null when the WD balance is unavailable. */
   notInWd: number | null
   lines: InrMerchantLine[]
+  /** Total Available Balance: the sheet's "TOTAL AVAILABLE BALANCE" for the brand (sum of its merchant lines when the sheet prints none). */
+  availableTotal: number
+  availableLimits: InrLimits
+  availableStatus: InrStatus
+  /** Limits and status of the Total WD Balance. */
   limits: InrLimits
   status: InrStatus
 }
@@ -54,6 +59,10 @@ export interface InrData {
   checks: InrCheck[]
   problems: string[]
 }
+
+/** The more urgent of two statuses (error, low, high, within limits, no limits, no balance). */
+const URGENCY: InrStatus[] = ['error', 'low', 'high', 'ok', 'unset', 'na']
+export const worstStatus = (...s: InrStatus[]): InrStatus => s.sort((a, b) => URGENCY.indexOf(a) - URGENCY.indexOf(b))[0]
 
 export const EMPTY_INR: InrData = { brands: [], lines: [], checks: [], problems: [] }
 export const NO_LIMITS: InrLimits = { low: 0, high: 0 }
@@ -167,7 +176,10 @@ export function parseInr(sheet: RawSheet | undefined, inr: InrSettings): InrData
       checks.push({ ok, label: `${brand}: merchant lines add up to the sheet's total`, detail: ok ? `${lineTotal.toFixed(2)}` : `Lines add to ${lineTotal.toFixed(2)} but the sheet prints ${block.sheetTotal.toFixed(2)}` })
     }
     if (w && w.error) checks.push({ ok: false, label: `${brand}: Total WD Balance`, detail: `The sheet shows ${w.error}. Fix that cell in INR-OVERVIEW and upload the CSV again.` })
+    const availableTotal = block?.sheetTotal ?? lineTotal
+    const availableLimits = inr.available?.[brand] ?? NO_LIMITS
     return {
+      availableTotal, availableLimits, availableStatus: block ? rateBalance(availableTotal, availableLimits) : 'na',
       brand, wdFound: !!w, wdBalance, wdError: w?.error ?? '', wdRange: w?.range ?? '', sheetTotal: block?.sheetTotal ?? null, lineTotal,
       notInWd: wdBalance === null ? null : lineTotal - wdBalance, lines, limits,
       status: !w || w.error ? 'error' : rateBalance(wdBalance, limits),

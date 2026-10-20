@@ -51,9 +51,12 @@ export default function ReportsPage() {
     const bdt = parseBdtLocalBank(dataset?.sheets.find(s => s.name === BDT_LOCALBANK_SHEET), settings).accounts
     if (bdt.length) out.push({ currency: 'BDT', gateway: 'Local Bank', label: 'Local Bank', accounts: bdt.length, balance: bdt.reduce((s, a) => s + a.balance, 0), deposit: bdt.reduce((s, a) => s + (a.todayDp ?? 0), 0), withdrawal: bdt.reduce((s, a) => s + (a.todayWd ?? 0), 0), ...counts('BDT', 'Local Bank'), to: '/currency/bdt/local-bank' })
     for (const b of inr.brands) if (b.lines.length || b.wdFound) {
-      const mine = ops.filter(i => i.currency === 'INR' && i.brand === b.brand)
-      out.push({ currency: 'INR', gateway: 'Brand total', label: `${b.brand} · Total WD balance`, accounts: b.lines.length, balance: b.wdBalance, deposit: null, withdrawal: null,
-        low: mine.filter(i => i.kind === 'low').length, high: mine.filter(i => i.kind === 'high').length, other: mine.filter(i => i.kind !== 'low' && i.kind !== 'high').length, to: '/currency/inr' })
+      const mine = ops.filter(i => i.currency === 'INR' && i.brand === b.brand && i.gateway === 'Brand total')
+      for (const [label, value, key] of [['Total available balance', b.availableTotal as number | null, 'available'], ['Total WD balance', b.wdBalance, 'WD']] as const) {
+        const own = mine.filter(i => i.name.endsWith(label))
+        out.push({ currency: 'INR', gateway: 'Brand total', label: `${b.brand} · ${label}`, accounts: key === 'available' ? b.lines.length : 0, balance: value, deposit: null, withdrawal: null,
+          low: own.filter(i => i.kind === 'low').length, high: own.filter(i => i.kind === 'high').length, other: own.filter(i => i.kind !== 'low' && i.kind !== 'high').length, to: '/currency/inr' })
+      }
     }
     return out
   }, [rows, ops, dataset, settings, inr])
@@ -113,7 +116,7 @@ export default function ReportsPage() {
             </tbody>
           </table>
         </div>
-        <p className="text-xs text-slate-400">Balances are shown per gateway and never added across currencies. Agent gateways show running balance; PKR Local Bank shows active accounts' closing balance with today's deposit / withdrawal; INR shows each brand's Total WD balance.</p>
+        <p className="text-xs text-slate-400">Balances are shown per gateway and never added across currencies. Agent gateways show running balance; PKR Local Bank shows active accounts' closing balance with today's deposit / withdrawal; INR shows each brand's Total available balance and Total WD balance.</p>
       </Section>
 
       <Section title="Daily deposit & withdrawal history" right={<button className="btn print:hidden" onClick={exportHistoryCsv} disabled={!history.length}><Download size={14} />CSV</button>}>

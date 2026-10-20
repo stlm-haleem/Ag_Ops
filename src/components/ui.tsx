@@ -33,10 +33,10 @@ export function Badge({ children, tone = 'slate' }: { children: ReactNode; tone?
 export const HealthBadge = ({ h }: { h: Health }) =>
   h === 'low' ? <Badge tone="red">Low</Badge> : h === 'high' ? <Badge tone="amber">High</Badge> : <Badge tone="green">Healthy</Badge>
 
-export function ChartCard({ title, children, height = 280 }: { title: string; children: ReactNode; height?: number }) {
+export function ChartCard({ title, children, height = 280, right }: { title: string; children: ReactNode; height?: number; right?: ReactNode }) {
   return (
     <div className="card p-4">
-      <div className="mb-3 text-sm font-semibold text-slate-700">{title}</div>
+      <div className="mb-3 flex items-center justify-between gap-2"><div className="text-sm font-semibold text-slate-700">{title}</div>{right}</div>
       <div style={{ height }}>{children}</div>
     </div>
   )

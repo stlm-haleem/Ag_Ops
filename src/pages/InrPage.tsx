@@ -4,7 +4,7 @@ import { AlertTriangle, ArrowDown, ArrowUp, Download, RotateCcw, Save } from 'lu
 import { Bar, BarChart, CartesianGrid, Cell, Legend, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { PageTitle } from '../components/Layout'
 import { Badge, ChartCard, Empty, Kpi, Section } from '../components/ui'
-import { InrBrandSummary, InrStatus, limitsError, merchantKey, parseInr } from '../lib/inr'
+import { InrBrandSummary, InrStatus, limitsError, merchantKey, parseInr, worstStatus } from '../lib/inr'
 import { compact, fmt } from '../lib/metrics'
 import { useData } from '../lib/store'
 import { INR_BRANDS, INR_SHEET, InrBrand, InrLimits, InrSettings } from '../lib/types'
@@ -14,13 +14,14 @@ import { INR_BRANDS, INR_SHEET, InrBrand, InrLimits, InrSettings } from '../lib/
 // shown live on the page, and only stored when the user presses Save.
 
 type Pair = { low: string; high: string }
-interface Draft { brands: Record<InrBrand, Pair>; merchants: Record<string, Pair> }
+interface Draft { brands: Record<InrBrand, Pair>; available: Record<InrBrand, Pair>; merchants: Record<string, Pair> }
 
 const asText = (n: number) => (n > 0 ? String(n) : '')
 const toNum = (t: string) => { const s = t.replace(/[,\s]/g, ''); return s === '' ? 0 : Number(s) }
 const pairOf = (l?: InrLimits): Pair => ({ low: asText(l?.low ?? 0), high: asText(l?.high ?? 0) })
 const toDraft = (s: InrSettings): Draft => ({
   brands: Object.fromEntries(INR_BRANDS.map(b => [b, pairOf(s.brands[b])])) as Record<InrBrand, Pair>,
+  available: Object.fromEntries(INR_BRANDS.map(b => [b, pairOf(s.available?.[b])])) as Record<InrBrand, Pair>,
   merchants: Object.fromEntries(Object.entries(s.merchants).map(([k, v]) => [k, pairOf(v)])),
 })
 const numbers = (p: Pair) => ({ low: toNum(p.low), high: toNum(p.high) })
@@ -29,9 +30,9 @@ const fromDraft = (d: Draft): InrSettings => {
   const safe = (p: Pair): InrLimits => { const n = numbers(p); return { low: Number.isFinite(n.low) && n.low > 0 ? n.low : 0, high: Number.isFinite(n.high) && n.high > 0 ? n.high : 0 } }
   const merchants: Record<string, InrLimits> = {}
   for (const [k, p] of Object.entries(d.merchants)) { const l = safe(p); if (l.low > 0 || l.high > 0) merchants[k] = l }
-  return { brands: Object.fromEntries(INR_BRANDS.map(b => [b, safe(d.brands[b])])) as Record<InrBrand, InrLimits>, merchants }
+  return { brands: Object.fromEntries(INR_BRANDS.map(b => [b, safe(d.brands[b])])) as Record<InrBrand, InrLimits>, available: Object.fromEntries(INR_BRANDS.map(b => [b, safe(d.available[b])])) as Record<InrBrand, InrLimits>, merchants }
 }
-const canon = (s: InrSettings) => JSON.stringify({ b: INR_BRANDS.map(b => [s.brands[b].low, s.brands[b].high]), m: Object.entries(s.merchants).sort(([a], [b]) => a.localeCompare(b)) })
+const canon = (s: InrSettings) => JSON.stringify({ b: INR_BRANDS.map(b => [s.brands[b].low, s.brands[b].high]), a: INR_BRANDS.map(b => [s.available?.[b]?.low ?? 0, s.available?.[b]?.high ?? 0]), m: Object.entries(s.merchants).sort(([a], [b]) => a.localeCompare(b)) })
 
 /* ----------------------------------------------------------------------- bits ----------------------------------------------------------------------- */
 
@@ -55,24 +56,24 @@ function LimitInputs({ value, onChange, size = 'md', ariaLabel }: { value: Pair;
   )
 }
 
-function BrandCard({ b, pair, onChange }: { b: InrBrandSummary; pair: Pair; onChange: (p: Pair) => void }) {
+/** One monitored figure of a brand (Total available balance, or Total WD balance) with its own Low / High limits. */
+function Metric({ title, hint, value, status, pair, onChange, ariaLabel, errorText, extra }: {
+  title: string; hint?: string; value: number | null; status: InrStatus; pair: Pair; onChange: (p: Pair) => void; ariaLabel: string; errorText?: React.ReactNode; extra?: React.ReactNode
+}) {
   const lim = numbers(pair)
   const err = limitsError(lim)
-  const pct = b.wdBalance !== null && lim.high > 0 ? Math.max(0, (b.wdBalance / lim.high) * 100) : null
-  const bar = b.status === 'high' ? 'bg-amber-500' : b.status === 'low' ? 'bg-rose-500' : 'bg-emerald-500'
+  const pct = value !== null && lim.high > 0 ? Math.max(0, (value / lim.high) * 100) : null
+  const bar = status === 'high' ? 'bg-amber-500' : status === 'low' ? 'bg-rose-500' : 'bg-emerald-500'
   return (
-    <div className={`card space-y-3 p-4 ${b.status === 'high' ? 'border-amber-400 bg-amber-50' : b.status === 'low' || b.status === 'error' ? 'border-rose-300 bg-rose-50' : ''}`}>
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2 font-semibold"><span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: BRAND_COLOR[b.brand] }} />{b.brand}</div>
-        <StatusBadge s={b.status} />
+    <div className="space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <div className="text-xs font-medium uppercase tracking-wide text-slate-500">{title}</div><StatusBadge s={status} />
       </div>
-      <div>
-        <div className="text-xs font-medium uppercase tracking-wide text-slate-500">Total WD balance</div>
-        {b.wdBalance !== null
-          ? <div className="mt-0.5 text-2xl font-semibold tabular-nums">{fmt(b.wdBalance, 2)}</div>
-          : <div className="mt-1 flex items-start gap-1.5 text-sm text-rose-700"><AlertTriangle size={16} className="mt-0.5 shrink-0" /><span>{b.wdFound ? <>The sheet shows <b>{b.wdError}</b> for this amount. It is not compared with thresholds until it is fixed in INR-OVERVIEW and the CSV is uploaded again.</> : 'Not found in the Total WD Balance table.'}</span></div>}
-        {b.wdRange && <div className="mt-0.5 text-xs text-slate-500">Current WD range {b.wdRange}</div>}
-      </div>
+      {value !== null
+        ? <div className="text-2xl font-semibold tabular-nums">{fmt(value, 2)}</div>
+        : <div className="flex items-start gap-1.5 text-sm text-rose-700"><AlertTriangle size={16} className="mt-0.5 shrink-0" /><span>{errorText}</span></div>}
+      {hint && <div className="text-xs text-slate-500">{hint}</div>}
+      {extra}
       {pct !== null && <div>
         <div className="relative h-2 overflow-hidden rounded-full bg-slate-200"><div className={`h-full ${bar}`} style={{ width: `${Math.min(100, pct)}%` }} />
           {lim.low > 0 && lim.high > lim.low && <div className="absolute top-0 h-full w-0.5 bg-slate-700/60" style={{ left: `${(lim.low / lim.high) * 100}%` }} title={`Low ${fmt(lim.low)}`} />}</div>
@@ -81,13 +82,24 @@ function BrandCard({ b, pair, onChange }: { b: InrBrandSummary; pair: Pair; onCh
       <div>
         <div className="mb-1 flex items-center justify-between text-xs text-slate-500"><span>Low (alert below) · High (alert above)</span>
           {(pair.low || pair.high) && <button className="text-slate-400 hover:text-slate-700" onClick={() => onChange({ low: '', high: '' })}>Clear</button>}</div>
-        <div className="grid grid-cols-2 gap-2"><LimitInputs value={pair} onChange={onChange} ariaLabel={`${b.brand} brand`} /></div>
+        <div className="grid grid-cols-2 gap-2"><LimitInputs value={pair} onChange={onChange} ariaLabel={ariaLabel} /></div>
         {err && <div className="mt-1 text-xs text-rose-600">{err}</div>}
       </div>
-      <div className="space-y-0.5 border-t border-slate-200 pt-2 text-xs text-slate-500">
-        <div className="flex justify-between"><span>Merchant balances (sheet total)</span><span className="tabular-nums text-slate-700">{fmt(b.sheetTotal ?? b.lineTotal, 2)}</span></div>
-        {b.notInWd !== null && Math.abs(b.notInWd) >= 0.005 && <div className="flex justify-between"><span>Not included in Total WD balance</span><span className="tabular-nums text-slate-700">{fmt(b.notInWd, 2)}</span></div>}
-      </div>
+    </div>
+  )
+}
+
+function BrandCard({ b, wdPair, availPair, onWd, onAvail }: { b: InrBrandSummary; wdPair: Pair; availPair: Pair; onWd: (p: Pair) => void; onAvail: (p: Pair) => void }) {
+  const worst = worstStatus(b.availableStatus, b.status)
+  return (
+    <div className={`card space-y-4 p-4 ${worst === 'high' ? 'border-amber-400 bg-amber-50' : worst === 'low' || worst === 'error' ? 'border-rose-300 bg-rose-50' : ''}`}>
+      <div className="flex items-center gap-2 font-semibold"><span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: BRAND_COLOR[b.brand] }} />{b.brand}</div>
+      <Metric title="Total available balance" hint={`All ${b.lines.length} merchant balances added up`} value={b.availableTotal} status={b.availableStatus} pair={availPair} onChange={onAvail} ariaLabel={`${b.brand} available`} />
+      <div className="border-t border-slate-200" />
+      <Metric title="Total WD balance" value={b.wdBalance} status={b.status} pair={wdPair} onChange={onWd} ariaLabel={`${b.brand} brand`}
+        hint={b.wdRange ? `Current WD range ${b.wdRange}` : undefined}
+        errorText={b.wdFound ? <>The sheet shows <b>{b.wdError}</b> for this amount. It is not compared with thresholds until it is fixed in INR-OVERVIEW and the CSV is uploaded again.</> : 'Not found in the Total WD Balance table.'}
+        extra={b.notInWd !== null && Math.abs(b.notInWd) >= 0.005 ? <div className="text-xs text-slate-500">{fmt(b.notInWd, 2)} of the available balance is not part of the WD balance</div> : undefined} />
     </div>
   )
 }
@@ -119,12 +131,13 @@ export default function InrPage() {
 
   const errors = useMemo(() => {
     const e: string[] = []
-    for (const b of INR_BRANDS) { const m = limitsError(numbers(draft.brands[b])); if (m) e.push(`${b}: ${m}`) }
+    for (const b of INR_BRANDS) { const m = limitsError(numbers(draft.brands[b])); if (m) e.push(`${b} WD: ${m}`); const a = limitsError(numbers(draft.available[b])); if (a) e.push(`${b} available: ${a}`) }
     for (const [k, p] of Object.entries(draft.merchants)) { const m = limitsError(numbers(p)); if (m) e.push(`${k.split('|').slice(0, 2).join(' · ')}: ${m}`) }
     return e
   }, [draft])
 
   const setBrandPair = (b: InrBrand, p: Pair) => { setNote(null); setDraft(d => ({ ...d, brands: { ...d.brands, [b]: p } })) }
+  const setAvailPair = (b: InrBrand, p: Pair) => { setNote(null); setDraft(d => ({ ...d, available: { ...d.available, [b]: p } })) }
   const setLinePair = (key: string, p: Pair) => { setNote(null); setDraft(d => ({ ...d, merchants: { ...d.merchants, [key]: p } })) }
   const save = async () => {
     if (errors.length) return
@@ -159,8 +172,9 @@ export default function InrPage() {
     return {
       wd: wdOk.reduce((s, b) => s + (b.wdBalance ?? 0), 0),
       wdMissing: shownBrands.filter(b => b.wdBalance === null).map(b => b.brand),
-      available: shownBrands.reduce((s, b) => s + b.lineTotal, 0),
-      brandHigh: shownBrands.filter(b => b.status === 'high').length, brandLow: shownBrands.filter(b => b.status === 'low').length,
+      available: shownBrands.reduce((s, b) => s + b.availableTotal, 0),
+      brandHigh: shownBrands.reduce((n, b) => n + (b.status === 'high' ? 1 : 0) + (b.availableStatus === 'high' ? 1 : 0), 0),
+      brandLow: shownBrands.reduce((n, b) => n + (b.status === 'low' ? 1 : 0) + (b.availableStatus === 'low' ? 1 : 0), 0),
       brandErr: shownBrands.filter(b => b.status === 'error').length,
       lineHigh: lines.filter(l => l.status === 'high').length, lineLow: lines.filter(l => l.status === 'low').length,
     }
@@ -180,7 +194,7 @@ export default function InrPage() {
     const total = (r: Record<string, number | string>) => INR_BRANDS.reduce((s, b) => s + ((r[b] as number) ?? 0), 0)
     return [...m.values()].sort((a, b) => total(b) - total(a))
   }, [shownBrands])
-  const compareChart = useMemo(() => shownBrands.map(b => ({ brand: b.brand, wd: b.wdBalance ?? undefined, merchants: b.lineTotal })), [shownBrands])
+  const compareChart = useMemo(() => shownBrands.map(b => ({ brand: b.brand, wd: b.wdBalance ?? undefined, merchants: b.availableTotal })), [shownBrands])
   const share = useMemo(() => data.brands.map(b => ({ name: b.brand, value: Math.max(0, b.lineTotal), color: BRAND_COLOR[b.brand] })).filter(x => x.value > 0), [data])
 
   if (!sheet || !data.brands.some(b => b.lines.length || b.wdFound)) return (
@@ -213,7 +227,7 @@ export default function InrPage() {
 
   return (
     <>
-      <PageTitle title="INR · Overview" subtitle="Merchant balances and Total WD (withdrawal) balance for BAJI, JEETBUZZ and SIX6S"
+      <PageTitle title="INR · Overview" subtitle="Total available balance (all merchants) and Total WD (withdrawal) balance for BAJI, JEETBUZZ and SIX6S"
         right={dataset?.updatedAt ? <div className="rounded-lg bg-white px-3 py-2 text-xs text-slate-600 shadow-sm ring-1 ring-slate-200">Data loaded {new Date(dataset.updatedAt).toLocaleString()}</div> : undefined} />
 
       <div className="flex flex-wrap gap-1 rounded-xl bg-slate-200/60 p-1">
@@ -230,18 +244,18 @@ export default function InrPage() {
           <div>{failing.map(c => <div key={c.label}><b>{c.label}.</b> {c.detail}</div>)}</div></div>
       )}
 
-      <Section title="Total WD balance by brand" right={<span className="text-xs text-slate-400">Type a Low / High limit: it shows at once, and applies for everyone after you press Save</span>}>
+      <Section title="Balances by brand" right={<span className="text-xs text-slate-400">Type a Low / High limit: it shows at once, and applies for everyone after you press Save</span>}>
         <div className={`grid gap-3 ${shownBrands.length === 1 ? 'md:grid-cols-1 xl:grid-cols-2' : 'md:grid-cols-3'}`}>
-          {shownBrands.map(b => <BrandCard key={b.brand} b={b} pair={draft.brands[b.brand]} onChange={p => setBrandPair(b.brand, p)} />)}
+          {shownBrands.map(b => <BrandCard key={b.brand} b={b} wdPair={draft.brands[b.brand]} availPair={draft.available[b.brand]} onWd={p => setBrandPair(b.brand, p)} onAvail={p => setAvailPair(b.brand, p)} />)}
         </div>
       </Section>
 
       <Section title="Alerts (click a merchant alert to filter the table)">
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-6">
+          <Kpi label="Total available balance" value={compact(k.available)} sub={fmt(k.available, 2)} tone="info" />
           <Kpi label="Total WD balance" value={compact(k.wd)} sub={k.wdMissing.length ? `Excludes ${k.wdMissing.join(', ')} (sheet error)` : fmt(k.wd, 2)} tone="info" />
-          <Kpi label="Merchant balances" value={compact(k.available)} sub={fmt(k.available, 2)} />
-          <Kpi label="Brands above High" value={fmt(k.brandHigh)} tone="warn" sub="Total WD balance" />
-          <Kpi label="Brands below Low" value={fmt(k.brandLow)} tone="bad" sub="Total WD balance" />
+          <Kpi label="Brand totals above High" value={fmt(k.brandHigh)} tone="warn" sub="Available + WD balance" />
+          <Kpi label="Brand totals below Low" value={fmt(k.brandLow)} tone="bad" sub="Available + WD balance" />
           <Kpi label="Merchants above High" value={fmt(k.lineHigh)} tone="warn" sub="Needs a merchant limit" onClick={() => pick('high')} active={flag === 'high'} />
           <Kpi label="Merchants below Low" value={fmt(k.lineLow)} tone="bad" sub="Needs a merchant limit" onClick={() => pick('low')} active={flag === 'low'} />
         </div>
@@ -255,9 +269,9 @@ export default function InrPage() {
           </ChartCard>
         </div>
         <div className="space-y-4">
-          <ChartCard title="Total WD balance vs merchant balances" height={240}>
-            <ResponsiveContainer><BarChart data={compareChart}><CartesianGrid strokeDasharray="3 3" vertical={false} /><XAxis dataKey="brand" fontSize={10} /><YAxis tickFormatter={compact} width={48} /><Tooltip formatter={(v: number) => fmt(v, 2)} /><Legend />
-              <Bar dataKey="wd" name="Total WD" fill="#6366f1" radius={[4, 4, 0, 0]} /><Bar dataKey="merchants" name="Merchants" fill="#94a3b8" radius={[4, 4, 0, 0]} /></BarChart></ResponsiveContainer>
+          <ChartCard title="Total available vs WD balance" height={240}>
+            <ResponsiveContainer><BarChart data={compareChart}><CartesianGrid strokeDasharray="3 3" vertical={false} /><XAxis dataKey="brand" fontSize={10} /><YAxis tickFormatter={compact} width={58} /><Tooltip formatter={(v: number) => fmt(v, 2)} /><Legend />
+              <Bar dataKey="wd" name="Total WD" fill="#6366f1" radius={[4, 4, 0, 0]} /><Bar dataKey="merchants" name="Available" fill="#94a3b8" radius={[4, 4, 0, 0]} /></BarChart></ResponsiveContainer>
           </ChartCard>
           <ChartCard title="Merchant balance share by brand" height={200}>
             {share.length ? <ResponsiveContainer><PieChart><Pie data={share} dataKey="value" nameKey="name" innerRadius={38} outerRadius={64} paddingAngle={2}>{share.map(p => <Cell key={p.name} fill={p.color} />)}</Pie><Tooltip formatter={(v: number) => fmt(v, 2)} /><Legend /></PieChart></ResponsiveContainer> : <Empty>No data</Empty>}

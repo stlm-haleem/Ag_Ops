@@ -64,11 +64,14 @@ export interface InrLimits { low: number; high: number }
 export interface InrSettings {
   /** Low / high limit for each brand's Total WD Balance. */
   brands: Record<InrBrand, InrLimits>
+  /** Low / high limit for each brand's Total Available Balance (all merchant balances added up). */
+  available: Record<InrBrand, InrLimits>
   /** Optional low / high limit per merchant line, keyed `${brand}|${merchant}|${code}`. */
   merchants: Record<string, InrLimits>
 }
 export const DEFAULT_INR_SETTINGS: InrSettings = {
   brands: { BAJI: { low: 0, high: 0 }, JEETBUZZ: { low: 0, high: 0 }, SIX6S: { low: 0, high: 0 } },
+  available: { BAJI: { low: 0, high: 0 }, JEETBUZZ: { low: 0, high: 0 }, SIX6S: { low: 0, high: 0 } },
   merchants: {},
 }
 
