@@ -21,7 +21,7 @@ export const GROUP_LABEL: Record<Group, string> = {
   LOCAL_BANK: 'Local Bank',
   BDT_LOCAL_BANK: 'BDT Local Bank',
 }
-/** Brand name shown for each PKR-BKK group. */
+/** Brand name shown for each PKR-BKK group (the sheet's Brand column holds the same names). */
 export const BKK_BRAND: Partial<Record<Group, string>> = { BKK_BAJI: 'BAJI', BKK_JB: 'JEETBUZZ', BKK_6S: 'SIX6S' }
 
 /** Sheet tab name -> group. Add new tabs here when more gateways go live. */
@@ -33,9 +33,9 @@ export const SHEET_GROUP: Record<string, { group: Group; currency: string; gatew
   'BDT-SSG-PERMANENT-STOP': { group: 'PERMANENT_STOP', currency: 'BDT', gateway: 'SSG' },
   'BDT-MCG': { group: 'MCG', currency: 'BDT', gateway: 'MCG' },
   'PKR-SSG': { group: 'PKR_SSG', currency: 'PKR', gateway: 'SSG' },
-  'PKR-BJ-BKK': { group: 'BKK_BAJI', currency: 'PKR', gateway: 'BKK' },
-  'PKR-JB-BKK': { group: 'BKK_JB', currency: 'PKR', gateway: 'BKK' },
-  'PKR-6S-BKK': { group: 'BKK_6S', currency: 'PKR', gateway: 'BKK' },
+  // PKR-BKK is ONE tab for all three brands (copy of the Bangkok-Pay MONITORING sheet). The brand of every row comes from its
+  // Brand column (see normalizeBkk), so the group below is only a placeholder.
+  'PKR-BKK': { group: 'BKK_BAJI', currency: 'PKR', gateway: 'BKK' },
 }
 export const DATA_SHEETS = Object.keys(SHEET_GROUP)
 /**
@@ -49,7 +49,7 @@ export const LOCALBANK_SHEET = 'PKR-LOCALBANK'
  * Read by src/lib/bdtLocalBank.ts, not by normalize() (not in SHEET_GROUP). The sheet is rebuilt every month under the same tab name.
  */
 export const BDT_LOCALBANK_SHEET = 'BDT-LOCALBANK'
-export const SYNCED_SHEETS = ['PKR-SSG', 'PKR-BJ-BKK', 'PKR-JB-BKK', 'PKR-6S-BKK', LOCALBANK_SHEET, BDT_LOCALBANK_SHEET]
+export const SYNCED_SHEETS = ['PKR-SSG', 'PKR-BKK', LOCALBANK_SHEET, BDT_LOCALBANK_SHEET]
 
 /**
  * INR overview: values-only copy of the INR-OVERVIEW tab (merchant balances per brand + each brand's Total WD Balance).
@@ -100,7 +100,10 @@ export interface AgentRow {
   commission: number
   topUp: number
   sdpPaid: number
-  /** PKR-BKK only (empty / 0 elsewhere): brand = BAJI / JEETBUZZ / SIX6S, one row per shop agent with 3 wallets */
+  /**
+   * PKR-BKK only (empty / 0 elsewhere): brand = BAJI / JEETBUZZ / SIX6S, one row per shop agent with 3 wallets.
+   * Sheet mapping: deposit* = "Manual Credit" (Total Deposit), wd* = "Cash In" (Total Withdrawal), stlm = "Total Special Payment".
+   */
   brand: string
   shop: string
   stlm: number
@@ -110,14 +113,29 @@ export interface AgentRow {
   wdJazz: number
   wdUpaisa: number
   wdNaya: number
-  /** Per-wallet status: Enable / Disable / Inactive (sheet icons ✅ ⭕ ❌) */
-  depStJazz: string
-  depStUpaisa: string
-  depStNaya: string
-  wdStJazz: string
-  wdStUpaisa: string
-  wdStNaya: string
-  /** OPENING + DEPOSIT - WITHDRAWAL - ADJUSTMENT */
+  /** "Cash Out" per wallet (information only: the sheet does not use it in the running balance) */
+  cashOut: number
+  coJazz: number
+  coUpaisa: number
+  coNaya: number
+  /** "Special Payment" per wallet */
+  spJazz: number
+  spUpaisa: number
+  spNaya: number
+  /** Limit: Available (= Allocation - Used), Allocation, Used, and Daily Available Balance per wallet */
+  avJazz: number
+  avUpaisa: number
+  avNaya: number
+  alJazz: number
+  alUpaisa: number
+  alNaya: number
+  usJazz: number
+  usUpaisa: number
+  usNaya: number
+  dbJazz: number
+  dbUpaisa: number
+  dbNaya: number
+  /** OPENING + DEPOSIT - WITHDRAWAL - ADJUSTMENT (PKR-BKK: OPENING + DEPOSIT + TOP UP - WITHDRAWAL - SPECIAL PAYMENT) */
   rBal: number
   aBal: number
   /** R. BAL - A. BAL */

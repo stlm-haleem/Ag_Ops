@@ -11,6 +11,8 @@ export function detectImportTarget(fileName: string): string | null {
   const token = normalizeToken(fileName.replace(/\.[^.]+$/, ''))
   if (/(^|_)inr(_|$)/.test(token)) return INR_SHEET
   if (/(^|_)mcg(_|$)/.test(token)) return 'BDT-MCG'
+  // Bangkok-Pay workbook: all three brands live in its MONITORING sheet, imported into the single PKR-BKK tab.
+  if (/(^|_)(bkk|bangkok)(_|$)/.test(token)) return 'PKR-BKK'
   // Check the more specific group first so "withdrawal_only" cannot be mistaken for a general agent file.
   if (/(^|_)(permanent_stop|permanentstop|permanent)(_|$)/.test(token)) return 'BDT-SSG-PERMANENT-STOP'
   if (/(^|_)(withdrawal_only|withdraw_only|withdrawal|withdraw)(_|$)/.test(token)) return 'BDT-SSG-WITHDRAWAL-ONLY'
@@ -29,9 +31,7 @@ export function importTargetLabel(sheetName: string): string {
   const group = SHEET_GROUP[sheetName]?.group
   if (group === 'MCG') return 'BDT · MCG'
   if (group === 'PKR_SSG') return 'PKR · SSG'
-  if (group === 'BKK_BAJI') return 'PKR · BKK · BAJI'
-  if (group === 'BKK_JB') return 'PKR · BKK · JEETBUZZ'
-  if (group === 'BKK_6S') return 'PKR · BKK · SIX6S'
+  if (sheetName === 'PKR-BKK') return 'PKR · Bangkok-Pay (all brands)'
   if (group === 'WITHDRAWAL') return 'BDT · SSG · Withdrawal only'
   if (group === 'PERMANENT_STOP') return 'BDT · SSG · Permanent Stop'
   if (group) return `BDT · SSG · ${group === 'AGENT' ? 'Agents' : group === 'PERSONAL' ? 'Personal' : 'VIP'}`
@@ -48,9 +48,10 @@ export async function parseExcel(file: File): Promise<Dataset> {
   let selected: { sourceName: string; targetName: string }[] = []
   let importTargetSheet: string | undefined
   if (filenameTarget) {
+    const monitoring = wb.SheetNames.find(n => normalizeToken(n) === 'monitoring')
     const sourceName = wb.SheetNames.includes(filenameTarget)
       ? filenameTarget
-      : (nonAnalyticsNames[0] || '')
+      : (filenameTarget === 'PKR-BKK' && monitoring) ? monitoring : (nonAnalyticsNames[0] || '')
     if (!sourceName) throw new Error('The workbook does not contain an operational worksheet.')
     selected = [{ sourceName, targetName: filenameTarget }]
     importTargetSheet = filenameTarget

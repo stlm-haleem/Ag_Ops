@@ -15,15 +15,16 @@
  */
 
 var FOLDER_NAME = 'PaymentOpsMonitor';
-var DATA_SHEETS = ['BDT-SSG-AGENT', 'BDT-SSG-PERSONAL', 'BDT-SSG-VIP', 'BDT-SSG-WITHDRAWAL-ONLY', 'BDT-SSG-PERMANENT-STOP', 'BDT-MCG', 'BDT-LOCALBANK', 'PKR-SSG', 'PKR-BJ-BKK', 'PKR-JB-BKK', 'PKR-6S-BKK', 'PKR-LOCALBANK', 'INR-OVERVIEW'];
+var DATA_SHEETS = ['BDT-SSG-AGENT', 'BDT-SSG-PERSONAL', 'BDT-SSG-VIP', 'BDT-SSG-WITHDRAWAL-ONLY', 'BDT-SSG-PERMANENT-STOP', 'BDT-MCG', 'BDT-LOCALBANK', 'PKR-SSG', 'PKR-BKK', 'PKR-LOCALBANK', 'INR-OVERVIEW'];
 // Tabs filled by a script sync (not by Excel import). A full-workbook import must never clear them.
-var SYNCED_SHEETS = ['BDT-LOCALBANK', 'PKR-SSG', 'PKR-BJ-BKK', 'PKR-JB-BKK', 'PKR-6S-BKK', 'PKR-LOCALBANK', 'INR-OVERVIEW'];
-var BKK_SHEETS = ['PKR-BJ-BKK', 'PKR-JB-BKK', 'PKR-6S-BKK'];
+var SYNCED_SHEETS = ['BDT-LOCALBANK', 'PKR-SSG', 'PKR-BKK', 'PKR-LOCALBANK', 'INR-OVERVIEW'];
+// PKR-BKK is ONE tab for all three brands (BAJI, JEETBUZZ, SIX6S): a copy of the MONITORING tab of the Bangkok-Pay workbook.
+var BKK_SHEETS = ['PKR-BKK'];
 
 // PKR-SSG is synced into the spreadsheet in ACCTLIST_DESTINATION_SPREADSHEET_ID (defined further down), which can be a
 // different file from the one in SHEET_ID that holds the BDT tabs. Read every tab from the spreadsheet it really lives in.
 function spreadsheetFor_(name) {
-  if (BKK_SHEETS.indexOf(name) >= 0) return SpreadsheetApp.openById(BJSM_DESTINATION_SPREADSHEET_ID);
+  if (BKK_SHEETS.indexOf(name) >= 0) return SpreadsheetApp.openById(BKK_DESTINATION_SPREADSHEET_ID);
   // BDT-LOCALBANK and INR-OVERVIEW (syncINROverview) live in the main spreadsheet.
   if (name === 'BDT-LOCALBANK' || name === 'INR-OVERVIEW') return spreadsheet_();
   if (SYNCED_SHEETS.indexOf(name) >= 0) return SpreadsheetApp.openById(ACCTLIST_DESTINATION_SPREADSHEET_ID);
@@ -38,7 +39,7 @@ var DAILY_GATEWAYS = {
   'BDT-SSG': { currency: 'BDT', gateway: 'SSG', sheets: ['BDT-SSG-AGENT', 'BDT-SSG-PERSONAL', 'BDT-SSG-VIP', 'BDT-SSG-WITHDRAWAL-ONLY', 'BDT-SSG-PERMANENT-STOP'] },
   'BDT-MCG': { currency: 'BDT', gateway: 'MCG', sheets: ['BDT-MCG'] },
   'PKR-SSG': { currency: 'PKR', gateway: 'SSG', sheets: ['PKR-SSG'] },
-  'PKR-BKK': { currency: 'PKR', gateway: 'BKK', sheets: ['PKR-BJ-BKK', 'PKR-JB-BKK', 'PKR-6S-BKK'] }
+  'PKR-BKK': { currency: 'PKR', gateway: 'BKK', sheets: ['PKR-BKK'] }
 };
 
 /* ------------------------------ entry points ------------------------------ */
@@ -578,25 +579,41 @@ function numVal_(v) {
   return isFinite(n) ? n : 0;
 }
 
+/**
+ * PKR-BKK: Deposit = the "Total Deposit" column, Withdrawal = the "Total Withdrawal" column (header row 2), summed over the
+ * agent rows only: rows without an Account (the TOTAL row and empty rows) are skipped so nothing is counted twice.
+ */
+function sumBkkTab_(sh, last) {
+  var out = { deposit: 0, withdrawal: 0 };
+  var cols = sh.getLastColumn();
+  var head = sh.getRange(1, 1, Math.min(last, 6), cols).getValues().map(function (r) {
+    return r.map(function (h) { return String(h).trim().toUpperCase().replace(/\s+/g, ' '); });
+  });
+  var nameRow = -1, walletRow = -1;
+  for (var i = 0; i < head.length; i++) {
+    if (nameRow < 0 && head[i].indexOf('TOTAL DEPOSIT') >= 0 && head[i].indexOf('TOTAL WITHDRAWAL') >= 0) nameRow = i;
+    if (walletRow < 0 && head[i].indexOf('JAZZCASH') >= 0 && head[i].indexOf('UPAISA') >= 0) walletRow = i;
+  }
+  var accCol = head[0].indexOf('ACCOUNT');
+  if (nameRow < 0 || walletRow < 0 || accCol < 0) return out;
+  var depCol = head[nameRow].indexOf('TOTAL DEPOSIT'), wdCol = head[nameRow].indexOf('TOTAL WITHDRAWAL');
+  var first = walletRow + 2; // first row (1-based) after the wallet-name row
+  if (last < first) return out;
+  sh.getRange(first, 1, last - first + 1, cols).getValues().forEach(function (r) {
+    if (String(r[accCol]).trim() === '') return;
+    out.deposit += numVal_(r[depCol]);
+    out.withdrawal += numVal_(r[wdCol]);
+  });
+  return out;
+}
+
 // Sum the DEPOSIT and WITHDRAWAL columns (matched by header name, any case) of one tab.
 function sumTab_(sh) {
   var out = { deposit: 0, withdrawal: 0 };
   var last = sh.getLastRow();
   if (last < 2) return out;
-  // PKR-BKK tabs have a two-row header (group title on row 1, JAZZCASH / UPAISA / NAYAPAY on row 2), data from row 3.
-  // Deposit = the TOTAL DEPOSIT column; Withdrawal = the WITHDRAWAL column (stored negative, so summed as amounts out).
-  var topRow = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].map(function (h) { return String(h).trim().toUpperCase(); });
-  var subRow = sh.getRange(2, 1, 1, sh.getLastColumn()).getValues()[0].map(function (h) { return String(h).trim().toUpperCase(); });
-  if (subRow.indexOf('JAZZCASH') >= 0 && subRow.indexOf('UPAISA') >= 0) {
-    var depC = -1;
-    for (var ci = 0; ci < subRow.length; ci++) { if (subRow[ci] === 'TOTAL DEPOSIT' || subRow[ci] === 'DEPOSIT') { depC = ci + 1; break; } }
-    var wdC = topRow.indexOf('WITHDRAWAL') + 1;
-    if (last >= 3) {
-      if (depC > 0) sh.getRange(3, depC, last - 2, 1).getValues().forEach(function (r) { out.deposit += numVal_(r[0]); });
-      if (wdC > 0) sh.getRange(3, wdC, last - 2, 1).getValues().forEach(function (r) { out.withdrawal += Math.abs(numVal_(r[0])); });
-    }
-    return out;
-  }
+  // PKR-BKK has three header rows and a TOTAL row (see sumBkkTab_).
+  if (sh.getName() === 'PKR-BKK') return sumBkkTab_(sh, last);
   var header = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].map(function (h) { return String(h).trim().toUpperCase(); });
   var dCol = header.indexOf('DEPOSIT') + 1, wCol = header.indexOf('WITHDRAWAL') + 1;
   if (dCol > 0) sh.getRange(2, dCol, last - 1, 1).getValues().forEach(function (r) { out.deposit += numVal_(r[0]); });
@@ -732,30 +749,36 @@ function authorize() {
 
 
 /**
- * Sync BJ SM from Google Sheet B
- * into PKR-BKK in Google Sheet C.
- * Copies values only, every minute.
+ * PKR-BKK (Bangkok-Pay): ONE sync for all three brands (BAJI, JEETBUZZ, SIX6S).
+ *
+ * Copies the MONITORING tab of the Bangkok-Pay workbook (BKK_SOURCE_SPREADSHEET_ID) into the PKR-BKK tab of the destination
+ * spreadsheet (BKK_DESTINATION_SPREADSHEET_ID): values, formatting, merged cells, column widths and row heights, exactly like
+ * the other synced tabs. The old per-brand syncs (BJ SM / JB SM / 6S SM -> PKR-BJ-BKK / PKR-JB-BKK / PKR-6S-BKK) are gone.
+ *
+ * SETUP (once): 1) paste the source spreadsheet ID below  2) run syncMonitoringToPKRBKK from the editor and approve access
+ *               3) run setupPKRBKKFiveMinuteSync (installs the 5-minute trigger and removes the old BKK triggers).
  */
 
-const BJSM_SOURCE_SPREADSHEET_ID = "1rZaHE1DXOws8rq73IavbTXxClSyPYk3scNwn4EcOdpY";
-const BJSM_DESTINATION_SPREADSHEET_ID = "1veUwMw7f9-R_XdyT6yuD3eQO8q6JezV2wJeMiCzymmQ";
+// The text between /d/ and /edit in the Bangkok-Pay workbook link.
+const BKK_SOURCE_SPREADSHEET_ID = "PASTE_THE_NEW_BANGKOK_PAY_SHEET_ID_HERE";
+// Spreadsheet that holds the PKR-BKK tab (the same file the old PKR-BJ-BKK / PKR-JB-BKK / PKR-6S-BKK tabs lived in).
+const BKK_DESTINATION_SPREADSHEET_ID = "1veUwMw7f9-R_XdyT6yuD3eQO8q6JezV2wJeMiCzymmQ";
+const BKK_SOURCE_TAB = "MONITORING";   // matched without regard to upper / lower case
+const BKK_DESTINATION_TAB = "PKR-BKK"; // created automatically if it does not exist yet
 
+function syncMonitoringToPKRBKK() {
+  if (!BKK_SOURCE_SPREADSHEET_ID || BKK_SOURCE_SPREADSHEET_ID.indexOf("PASTE_") === 0) {
+    throw new Error("Set BKK_SOURCE_SPREADSHEET_ID (the ID of the Bangkok-Pay sheet) at the top of the PKR-BKK sync section.");
+  }
+  const sourceSS = SpreadsheetApp.openById(BKK_SOURCE_SPREADSHEET_ID);
+  const destinationSS = SpreadsheetApp.openById(BKK_DESTINATION_SPREADSHEET_ID);
 
+  const source = sourceSS.getSheets().filter(function (sh) {
+    return sh.getName().trim().toUpperCase() === BKK_SOURCE_TAB;
+  })[0];
+  if (!source) throw new Error('Source tab "' + BKK_SOURCE_TAB + '" not found.');
 
-
-function syncBJSMtoPKRBKK() {
-  const sourceSS = SpreadsheetApp.openById(
-    BJSM_SOURCE_SPREADSHEET_ID
-  );
-  const destinationSS = SpreadsheetApp.openById(
-    BJSM_DESTINATION_SPREADSHEET_ID
-  );
-
-  const source = sourceSS.getSheetByName("BJ SM");
-  const destination = destinationSS.getSheetByName("PKR-BJ-BKK");
-
-  if (!source) throw new Error('Source tab "BJ SM" not found.');
-  if (!destination) throw new Error('Destination tab "PKR-BJ-BKK" not found.');
+  const destination = destinationSS.getSheetByName(BKK_DESTINATION_TAB) || destinationSS.insertSheet(BKK_DESTINATION_TAB);
 
   const sourceRange = source.getDataRange();
   const rows = Math.max(sourceRange.getNumRows(), 1);
@@ -763,23 +786,17 @@ function syncBJSMtoPKRBKK() {
 
   // Make sure the destination has enough rows and columns.
   if (destination.getMaxRows() < rows) {
-    destination.insertRowsAfter(
-      destination.getMaxRows(),
-      rows - destination.getMaxRows()
-    );
+    destination.insertRowsAfter(destination.getMaxRows(), rows - destination.getMaxRows());
+  }
+  if (destination.getMaxColumns() < cols) {
+    destination.insertColumnsAfter(destination.getMaxColumns(), cols - destination.getMaxColumns());
   }
 
-  if (destination.getMaxColumns() < cols) {
-    destination.insertColumnsAfter(
-      destination.getMaxColumns(),
-      cols - destination.getMaxColumns()
-    );
-  }
+  // Remember whether the data really changed, so the dashboard only re-downloads this tab when needed.
+  const sourceValues = sourceRange.getValues();
+  const bkkChanged = JSON.stringify(destination.getDataRange().getValues()) !== JSON.stringify(sourceValues);
 
   // Remove old destination content and formatting.
-  // Remember whether the data really changed, so the dashboard only re-downloads this tab when needed.
-  const bkkChanged = JSON.stringify(destination.getDataRange().getValues()) !== JSON.stringify(sourceRange.getValues());
-
   const oldRange = destination.getDataRange();
   oldRange.breakApart();
   oldRange.clear();
@@ -787,7 +804,7 @@ function syncBJSMtoPKRBKK() {
   const targetRange = destination.getRange(1, 1, rows, cols);
 
   // Copy values.
-  targetRange.setValues(sourceRange.getValues());
+  targetRange.setValues(sourceValues);
 
   // Copy common formatting.
   targetRange.setBackgrounds(sourceRange.getBackgrounds());
@@ -797,61 +814,64 @@ function syncBJSMtoPKRBKK() {
   targetRange.setFontWeights(sourceRange.getFontWeights());
   targetRange.setFontStyles(sourceRange.getFontStyles());
   targetRange.setFontLines(sourceRange.getFontLines());
-  targetRange.setHorizontalAlignments(
-    sourceRange.getHorizontalAlignments()
-  );
-  targetRange.setVerticalAlignments(
-    sourceRange.getVerticalAlignments()
-  );
+  targetRange.setHorizontalAlignments(sourceRange.getHorizontalAlignments());
+  targetRange.setVerticalAlignments(sourceRange.getVerticalAlignments());
   targetRange.setNumberFormats(sourceRange.getNumberFormats());
   targetRange.setWraps(sourceRange.getWraps());
   targetRange.setTextRotations(sourceRange.getTextRotations());
 
-  // Copy merged cells.
-  source.getDataRange().getMergedRanges().forEach(function (merged) {
-    destination
-      .getRange(
-        merged.getRow(),
-        merged.getColumn(),
-        merged.getNumRows(),
-        merged.getNumColumns()
-      )
-      .merge();
+  // Copy merged cells (the three header rows are merged across their wallet columns).
+  sourceRange.getMergedRanges().forEach(function (merged) {
+    destination.getRange(
+      merged.getRow(),
+      merged.getColumn(),
+      merged.getNumRows(),
+      merged.getNumColumns()
+    ).merge();
   });
 
   // Copy column widths and row heights.
   for (let c = 1; c <= cols; c++) {
     destination.setColumnWidth(c, source.getColumnWidth(c));
   }
-
   for (let r = 1; r <= rows; r++) {
     destination.setRowHeight(r, source.getRowHeight(r));
   }
 
   // The onEdit trigger does not fire for script writes, so tell the dashboard that this tab changed.
-  if (bkkChanged) props_().setProperty(sheetRevisionKey_("PKR-BJ-BKK"), String(Date.now()));
+  if (bkkChanged) props_().setProperty(sheetRevisionKey_(BKK_DESTINATION_TAB), String(Date.now()));
 
   Logger.log(
-    "Sync completed: " + rows + " rows, " + cols + " columns."
+    "PKR-BKK sync completed: " + rows + " rows, " + cols + " columns" + (bkkChanged ? " (data changed)." : " (no data change).")
   );
 }
 
+// Run once. Installs the 5-minute trigger for the new sync, removes the triggers of the OLD per-brand BKK syncs
+// (their functions no longer exist, so leaving those triggers would only produce error e-mails) and runs a first sync.
+function setupPKRBKKFiveMinuteSync() {
+  const handlers = [
+    "syncMonitoringToPKRBKK",
+    // old per-brand syncs, removed from this script:
+    "syncBJSMtoPKRBKK",
+    "syncJBtoPKRJB_BKK",
+    "sync6StoPKR6SBKK"
+  ];
 
-
-
-function setupBJSMMinuteSync() {
-  // Remove duplicate triggers for this sync only.
   ScriptApp.getProjectTriggers()
-    .filter(t => t.getHandlerFunction() === "syncBJSMtoPKRBKK")
-    .forEach(t => ScriptApp.deleteTrigger(t));
+    .filter(function (trigger) {
+      return handlers.indexOf(trigger.getHandlerFunction()) !== -1;
+    })
+    .forEach(function (trigger) {
+      ScriptApp.deleteTrigger(trigger);
+    });
 
-  ScriptApp.newTrigger("syncBJSMtoPKRBKK")
+  ScriptApp.newTrigger("syncMonitoringToPKRBKK")
     .timeBased()
-    .everyMinutes(1)
+    .everyMinutes(5)
     .create();
 
   // Perform the initial sync immediately.
-  syncBJSMtoPKRBKK();
+  syncMonitoringToPKRBKK();
 }
 
 
@@ -996,144 +1016,6 @@ function setupACCTLISTMinuteSync() {
   // Run the first sync immediately.
   syncACCTLISTtoPKRSSG();
 }
-
-
-// New BKK syncs: JB SM and 6S SM
-// Uses the same source and destination spreadsheets as the existing sync.
-
-function syncJBtoPKRJB_BKK() {
-  syncBKKTab_("JB SM", "PKR-JB-BKK");
-}
-
-function sync6StoPKR6SBKK() {
-  syncBKKTab_("6S SM", "PKR-6S-BKK");
-}
-
-function syncBKKTab_(sourceTabName, destinationTabName) {
-  const sourceSS = SpreadsheetApp.openById(
-    BJSM_SOURCE_SPREADSHEET_ID
-  );
-  const destinationSS = SpreadsheetApp.openById(
-    BJSM_DESTINATION_SPREADSHEET_ID
-  );
-
-  const source = sourceSS.getSheetByName(sourceTabName);
-  const destination = destinationSS.getSheetByName(destinationTabName);
-
-  if (!source) {
-    throw new Error('Source tab "' + sourceTabName + '" not found.');
-  }
-  if (!destination) {
-    throw new Error(
-      'Destination tab "' + destinationTabName + '" not found.'
-    );
-  }
-
-  const sourceRange = source.getDataRange();
-  const rows = Math.max(sourceRange.getNumRows(), 1);
-  const cols = Math.max(sourceRange.getNumColumns(), 1);
-
-  if (destination.getMaxRows() < rows) {
-    destination.insertRowsAfter(
-      destination.getMaxRows(),
-      rows - destination.getMaxRows()
-    );
-  }
-
-  if (destination.getMaxColumns() < cols) {
-    destination.insertColumnsAfter(
-      destination.getMaxColumns(),
-      cols - destination.getMaxColumns()
-    );
-  }
-
-  // Remember whether the data really changed, so the dashboard only re-downloads this tab when needed.
-  const bkkChanged = JSON.stringify(destination.getDataRange().getValues()) !== JSON.stringify(sourceRange.getValues());
-
-  const oldRange = destination.getDataRange();
-  oldRange.breakApart();
-  oldRange.clear();
-
-  const targetRange = destination.getRange(1, 1, rows, cols);
-
-  targetRange.setValues(sourceRange.getValues());
-  targetRange.setBackgrounds(sourceRange.getBackgrounds());
-  targetRange.setFontColors(sourceRange.getFontColors());
-  targetRange.setFontFamilies(sourceRange.getFontFamilies());
-  targetRange.setFontSizes(sourceRange.getFontSizes());
-  targetRange.setFontWeights(sourceRange.getFontWeights());
-  targetRange.setFontStyles(sourceRange.getFontStyles());
-  targetRange.setFontLines(sourceRange.getFontLines());
-  targetRange.setHorizontalAlignments(
-    sourceRange.getHorizontalAlignments()
-  );
-  targetRange.setVerticalAlignments(
-    sourceRange.getVerticalAlignments()
-  );
-  targetRange.setNumberFormats(sourceRange.getNumberFormats());
-  targetRange.setWraps(sourceRange.getWraps());
-  targetRange.setTextRotations(sourceRange.getTextRotations());
-
-  sourceRange.getMergedRanges().forEach(function (merged) {
-    destination.getRange(
-      merged.getRow(),
-      merged.getColumn(),
-      merged.getNumRows(),
-      merged.getNumColumns()
-    ).merge();
-  });
-
-  for (let c = 1; c <= cols; c++) {
-    destination.setColumnWidth(c, source.getColumnWidth(c));
-  }
-
-  for (let r = 1; r <= rows; r++) {
-    destination.setRowHeight(r, source.getRowHeight(r));
-  }
-
-  if (bkkChanged) props_().setProperty(sheetRevisionKey_(destinationTabName), String(Date.now()));
-
-  Logger.log(
-    sourceTabName + " -> " + destinationTabName +
-    ": synced " + rows + " rows and " + cols + " columns."
-  );
-}
-
-
-// Run once after both manual tests succeed.
-// Installs 5-minute triggers for the two new syncs only.
-function setupNewBKKSyncs() {
-  const handlers = [
-    "syncJBtoPKRJB_BKK",
-    "sync6StoPKR6SBKK"
-  ];
-
-  ScriptApp.getProjectTriggers()
-    .filter(function (trigger) {
-      return handlers.indexOf(trigger.getHandlerFunction()) !== -1;
-    })
-    .forEach(function (trigger) {
-      ScriptApp.deleteTrigger(trigger);
-    });
-
-  ScriptApp.newTrigger("syncJBtoPKRJB_BKK")
-    .timeBased()
-    .everyMinutes(5)
-    .create();
-
-  ScriptApp.newTrigger("sync6StoPKR6SBKK")
-    .timeBased()
-    .everyMinutes(5)
-    .create();
-}
-
-
-
-
-
-
-
-
 
 
 // PKR Local Bank source spreadsheet.
@@ -1424,6 +1306,15 @@ function syncINROverview() {
   }
   for (let r = 1; r <= rows; r++) {
     destination.setRowHeight(r, source.getRowHeight(r));
+  }
+
+  // Tell the app the tab changed. Without this the app keeps showing the rows it already downloaded, because a script
+  // write does not fire onEdit (the other synced tabs bump their revision the same way). The first run after this
+  // update has no saved fingerprint, so it always bumps once.
+  const digest = Utilities.base64Encode(Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, JSON.stringify(values)));
+  if (props_().getProperty("INR_SYNC_HASH") !== digest) {
+    props_().setProperty(sheetRevisionKey_("INR-OVERVIEW"), String(Date.now()));
+    props_().setProperty("INR_SYNC_HASH", digest);
   }
 
   Logger.log("LATEST BALANCES -> INR-OVERVIEW sync completed: " + rows + " rows, " + cols + " columns.");

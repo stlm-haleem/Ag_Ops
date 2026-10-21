@@ -1,6 +1,7 @@
 import { parseBdtLocalBank } from './bdtLocalBank'
 import { parseInr } from './inr'
 import { parseLocalBank } from './localBank'
+import { bkkExceededWallets } from './normalize'
 import { AgentRow, BDT_LOCALBANK_SHEET, Dataset, INR_SHEET, LOCALBANK_SHEET, Settings } from './types'
 
 /**
@@ -44,7 +45,7 @@ export function buildOps(rows: AgentRow[], dataset: Dataset | null, settings: Se
     if (r.health === 'low') out.push({ ...base, id: `${r.id}|low`, kind: 'low', detail: 'Running balance is below the low threshold' })
     if (r.health === 'high') out.push({ ...base, id: `${r.id}|high`, kind: 'high', detail: r.actSdp > 0 ? `Running balance is above its SDP (${r.actSdp.toLocaleString('en-US')})` : 'Running balance is above the higher-balance threshold' })
     if (r.highDiscrep) out.push({ ...base, id: `${r.id}|discrep`, kind: 'discrep', detail: `Running − actual balance = ${r.discrep.toLocaleString('en-US', { maximumFractionDigits: 2 })}` })
-    if (r.limitExceeded) out.push({ ...base, id: `${r.id}|limit`, kind: 'limit', detail: r.gateway === 'BKK' ? 'Marked EXCEED in the sheet' : 'Deposit is above the utilized limit' })
+    if (r.limitExceeded) out.push({ ...base, id: `${r.id}|limit`, kind: 'limit', detail: r.gateway === 'BKK' ? `Limit available is below 0 on ${bkkExceededWallets(r).join(', ')}` : 'Deposit is above the utilized limit' })
   }
 
   if (dataset) {

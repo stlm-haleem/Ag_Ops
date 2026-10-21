@@ -41,7 +41,7 @@ export default function GatewayPage({ currency, gateway }: { currency: string; g
   const wallets = useMemo(() => byWallet(visualRows), [visualRows])
   const bkkWallets = useMemo(() => byBkkWallet(scoped), [scoped])
   const shops = useMemo(() => byShop(scoped).slice(0, 12), [scoped])
-  const bkkSum = useMemo(() => ({ stlm: scoped.reduce((s, r) => s + r.stlm, 0), topUp: scoped.reduce((s, r) => s + r.topUp, 0) }), [scoped])
+  const bkkSum = useMemo(() => ({ stlm: scoped.reduce((s, r) => s + r.stlm, 0), topUp: scoped.reduce((s, r) => s + r.topUp, 0), cashOut: scoped.reduce((s, r) => s + r.cashOut, 0) }), [scoped])
   const top = useMemo(() => [...visualRows].sort((a, b) => b.rBal - a.rBal).slice(0, 10), [visualRows])
   const top5W = useMemo(() => [...visualRows].sort((a, b) => b.withdrawal - a.withdrawal).slice(0, 10), [visualRows])
   const pie = [
@@ -67,7 +67,7 @@ export default function GatewayPage({ currency, gateway }: { currency: string; g
 
   return (
     <>
-      <PageTitle title={`${currency} · ${gateway}`} subtitle={isBkk ? 'Shop agents by brand — balances, deposits, withdrawals and wallet status' : 'Agent wallet monitoring — balances, activity, limits and discrepancies'} />
+      <PageTitle title={`${currency} · ${gateway}`} subtitle={isBkk ? 'Shop agents by brand — balances, deposits, withdrawals, special payments and wallet limits' : 'Agent wallet monitoring — balances, activity, limits and discrepancies'} />
 
       {groups.length > 1 && <div className="flex flex-wrap gap-1 rounded-xl bg-slate-200/60 p-1">
         {(['ALL', ...groups] as Tab[]).map(t => (
@@ -104,12 +104,12 @@ export default function GatewayPage({ currency, gateway }: { currency: string; g
           <Kpi label="Higher balance agents" value={fmt(k.high)} tone="warn" sub={isBkk ? 'R. Bal above SDP (no SDP: Settings threshold)' : isPkr ? 'R. Bal above SDP' : `R. Bal above SDP (fallback ${gateway === 'MCG' ? '50,000' : '100,000'})`} onClick={() => pick('high')} active={flag === 'high'} />
           <Kpi label="Low balance agents" value={fmt(k.low)} tone="bad" sub="R. Bal below low threshold (incl. negative)" onClick={() => pick('low')} active={flag === 'low'} />
           {!isBkk && <Kpi label="High discrepancy agents" value={fmt(k.highDiscrep)} tone="bad" sub="|R. Bal − A. Bal| above threshold" onClick={() => pick('discrep')} active={flag === 'discrep'} />}
-          <Kpi label={isBkk ? 'Exceed' : 'Limit exceeded'} value={fmt(k.limitExceeded)} tone="warn" sub={isBkk ? 'Sheet EXCEED status' : 'Deposit > utilized limit'} onClick={() => pick('limit')} active={flag === 'limit'} />
+          <Kpi label="Limit exceeded" value={fmt(k.limitExceeded)} tone="warn" sub={isBkk ? 'Limit available below 0 on any wallet' : 'Deposit > utilized limit'} onClick={() => pick('limit')} active={flag === 'limit'} />
         </div>
       </Section>
 
       {isBkk ? <Section title="Wallets — deposit & withdrawal">
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">{bkkWallets.map(w => <Kpi key={w.wallet} label={w.wallet} value={compact(w.deposit)} sub={`Deposit · Withdrawal ${fmt(w.withdrawal)} · ${fmt(w.depEnabled)} dep / ${fmt(w.wdEnabled)} wd enabled`} tone="info" />)}</div>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">{bkkWallets.map(w => <Kpi key={w.wallet} label={w.wallet} value={compact(w.deposit)} sub={`Deposit · Withdrawal ${fmt(w.withdrawal)} · Cash out ${fmt(w.cashOut)} · ${fmt(w.exceeded)} over limit`} tone="info" />)}</div>
       </Section> : <Section title="Running balance by wallet" right={gateway === 'SSG' ? <span className="text-xs text-slate-400">IBBL and blank wallets excluded from wallet cards and charts</span> : undefined}>
         {wallets.length
           ? <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">{wallets.map(w => <Kpi key={w.wallet} label={w.wallet} value={compact(w.rBal)} sub={`${fmt(w.accounts)} accounts · ${fmt(w.rBal, 2)}`} tone="info" />)}</div>
@@ -117,13 +117,14 @@ export default function GatewayPage({ currency, gateway }: { currency: string; g
       </Section>}
 
       {isBkk ? <Section title="Balances & flow">
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 xl:grid-cols-7">
-          <Kpi label="Accounts" value={fmt(k.accounts)} sub={`${fmt(k.loggedIn)} active`} />
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 xl:grid-cols-8">
+          <Kpi label="Accounts" value={fmt(k.accounts)} sub={`${fmt(k.loggedIn)} active · ${fmt(k.accounts - k.loggedIn)} inactive`} />
           <Kpi label="Running balance" value={compact(k.rBal)} sub={fmt(k.rBal, 2)} tone="info" />
           <Kpi label="Deposit" value={compact(k.deposit)} sub={fmt(k.deposit)} tone="good" />
           <Kpi label="Withdrawal" value={compact(k.withdrawal)} sub={fmt(k.withdrawal)} />
-          <Kpi label="STLM/SPC" value={compact(bkkSum.stlm)} sub={fmt(bkkSum.stlm)} />
+          <Kpi label="Special payment" value={compact(bkkSum.stlm)} sub={fmt(bkkSum.stlm)} />
           <Kpi label="Top up" value={compact(bkkSum.topUp)} sub={fmt(bkkSum.topUp)} />
+          <Kpi label="Cash out" value={compact(bkkSum.cashOut)} sub="Information only (not in R. Bal)" />
           <Kpi label="Total flow" value={compact(k.flow)} sub="Deposit + Withdrawal" />
         </div>
       </Section> : <Section title="Balances & flow">
@@ -164,9 +165,9 @@ export default function GatewayPage({ currency, gateway }: { currency: string; g
         {isBkk ? <div className="card overflow-auto">
           <div className="p-4 text-sm font-semibold text-slate-700">Wallet summary</div>
           <table className="w-full text-sm">
-            <thead className="bg-slate-50 text-xs uppercase text-slate-500"><tr>{['Wallet', 'Deposit', 'Withdrawal', 'Deposit enabled', 'Withdrawal enabled'].map((h, i) => <th key={h} className={`px-3 py-2 ${i ? 'text-right' : 'text-left'}`}>{h}</th>)}</tr></thead>
+            <thead className="bg-slate-50 text-xs uppercase text-slate-500"><tr>{['Wallet', 'Deposit', 'Withdrawal', 'Cash out', 'Special payment', 'Limit available', 'Over limit'].map((h, i) => <th key={h} className={`px-3 py-2 ${i ? 'text-right' : 'text-left'}`}>{h}</th>)}</tr></thead>
             <tbody className="divide-y divide-slate-100">
-              {bkkWallets.map(w => <tr key={w.wallet}><td className="px-3 py-1.5 font-medium">{w.wallet}</td><td className="px-3 py-1.5 text-right tabular-nums">{fmt(w.deposit)}</td><td className="px-3 py-1.5 text-right tabular-nums">{fmt(w.withdrawal)}</td><td className="px-3 py-1.5 text-right tabular-nums">{fmt(w.depEnabled)}</td><td className="px-3 py-1.5 text-right tabular-nums">{fmt(w.wdEnabled)}</td></tr>)}
+              {bkkWallets.map(w => <tr key={w.wallet}><td className="px-3 py-1.5 font-medium">{w.wallet}</td><td className="px-3 py-1.5 text-right tabular-nums">{fmt(w.deposit)}</td><td className="px-3 py-1.5 text-right tabular-nums">{fmt(w.withdrawal)}</td><td className="px-3 py-1.5 text-right tabular-nums">{fmt(w.cashOut)}</td><td className="px-3 py-1.5 text-right tabular-nums">{fmt(w.special)}</td><td className="px-3 py-1.5 text-right tabular-nums">{fmt(w.available)}</td><td className="px-3 py-1.5 text-right tabular-nums">{fmt(w.exceeded)}</td></tr>)}
             </tbody>
           </table>
         </div> : (

@@ -4,16 +4,12 @@ import { AgentRow, GROUP_LABEL } from '../lib/types'
 import { fmt } from '../lib/metrics'
 import { Badge, HealthBadge } from './ui'
 
-const stateTone = (s: string) => (s === 'Logged In' || s === 'Active' ? 'green' : s === 'Logged Out' || s === 'Disabled' ? 'slate' : 'red') as 'green' | 'slate' | 'red'
+const stateTone = (s: string) => (s === 'Logged In' || s === 'Active' ? 'green' : s === 'Logged Out' || s === 'Disabled' || s === 'Inactive' ? 'slate' : 'red') as 'green' | 'slate' | 'red'
 
 export type Flag = 'all' | 'low' | 'high' | 'healthy' | 'discrep' | 'limit'
 const PAGE_SIZES = [25, 50, 100, 250]
 
 type Col = { key: keyof AgentRow | 'flags'; label: string; num?: boolean; render?: (r: AgentRow) => React.ReactNode; hideInGroup?: boolean; group?: string }
-
-/** PKR-BKK wallet status cell: the status as text (Enable / Disable / Inactive). */
-const walletTone = (v: string) => (v === 'Enable' ? 'green' : v === 'Disable' ? 'amber' : 'slate') as 'green' | 'amber' | 'slate'
-const statusCell = (v: string) => v ? <Badge tone={walletTone(v)}>{v}</Badge> : <span className="text-slate-400">—</span>
 
 const money = (n: number) => <span className={n < 0 ? 'text-rose-600' : ''}>{fmt(n, 2)}</span>
 
@@ -82,27 +78,34 @@ export default function AgentTable({ rows, showType, flag, onFlag, gateway, curr
     { key: 'sdpPaid', label: 'SDP paid', num: true },
     { key: 'remarks', label: isMcg ? 'Status remark' : 'Remarks' },
   ]
-  const wal = (title: string, keys: (keyof AgentRow)[], num: boolean): Col[] =>
-    keys.map((k, i) => ({ key: k, label: ['JazzCash', 'UPaisa', 'NayaPay'][i], group: title, num, render: num ? undefined : (r: AgentRow) => statusCell(r[k] as string) }))
-  // PKR-BKK: same left-to-right order as the sheet (two-row header: group title above, wallet below).
+  const wal = (title: string, keys: (keyof AgentRow)[]): Col[] =>
+    keys.map((k, i) => ({ key: k, label: ['JazzCash', 'UPaisa', 'NayaPay'][i], group: title, num: true }))
+  // Limit "Available" per wallet: red when below 0 (that is what raises the Limit exceeded alert).
+  const walAvail = (): Col[] => (['avJazz', 'avUpaisa', 'avNaya'] as (keyof AgentRow)[]).map((k, i) => ({ key: k, label: ['JazzCash', 'UPaisa', 'NayaPay'][i], group: 'Limit available', num: true, render: (r: AgentRow) => <span className={(r[k] as number) < 0 ? 'font-semibold text-rose-600' : ''}>{fmt(r[k] as number, 2)}</span> }))
+  // PKR-BKK: same left-to-right order as the new sheet (group title above, wallet below).
   const bkkCols: Col[] = [
     { key: 'account', label: 'Account' },
     { key: 'brand', label: 'Brand', render: r => <Badge tone="purple">{r.brand}</Badge>, hideInGroup: true },
     { key: 'shop', label: 'Shop' },
-    { key: 'login', label: 'Status', render: r => <Badge tone={stateTone(r.login)}>{r.login}</Badge> },
+    { key: 'login', label: 'Deposit status', render: r => <Badge tone={stateTone(r.login)}>{r.login || '—'}</Badge> },
     { key: 'actSdp', label: 'SDP', num: true, render: r => r.actSdp > 0 ? money(r.actSdp) : <span className="text-slate-400">—</span> },
     { key: 'opening', label: 'Opening', num: true },
-    ...wal('Deposit', ['depJazz', 'depUpaisa', 'depNaya'], true),
-    { key: 'deposit', label: 'Total deposit', num: true, group: 'Deposit' },
-    { key: 'withdrawal', label: 'Withdrawal', num: true },
-    { key: 'stlm', label: 'STLM/SPC', num: true },
-    { key: 'topUp', label: 'Top up', num: true },
     { key: 'rBal', label: 'R. Bal', num: true },
     { key: 'health', label: 'Balance', render: r => <HealthBadge h={r.health} /> },
-    ...wal('Deposit status', ['depStJazz', 'depStUpaisa', 'depStNaya'], false),
-    ...wal('Withdrawal status', ['wdStJazz', 'wdStUpaisa', 'wdStNaya'], false),
-    { key: 'limitStatus', label: 'Exceed', render: r => r.limitExceeded ? <Badge tone="amber">EXCEED</Badge> : <span className="text-slate-500">{r.limitStatus}</span> },
-    ...wal('Withdrawal by wallet', ['wdJazz', 'wdUpaisa', 'wdNaya'], true),
+    { key: 'deposit', label: 'Total deposit', num: true },
+    ...wal('Deposit (manual credit)', ['depJazz', 'depUpaisa', 'depNaya']),
+    { key: 'topUp', label: 'Top up', num: true },
+    { key: 'withdrawal', label: 'Total withdrawal', num: true },
+    ...wal('Withdrawal (cash in)', ['wdJazz', 'wdUpaisa', 'wdNaya']),
+    ...wal('Cash out', ['coJazz', 'coUpaisa', 'coNaya']),
+    { key: 'stlm', label: 'Total special pmt', num: true },
+    ...wal('Special payment', ['spJazz', 'spUpaisa', 'spNaya']),
+    { key: 'limitStatus', label: 'Limit', render: r => r.limitExceeded ? <Badge tone="amber">EXCEED</Badge> : <span className="text-slate-500">OK</span> },
+    ...walAvail(),
+    ...wal('Limit allocation', ['alJazz', 'alUpaisa', 'alNaya']),
+    ...wal('Limit used', ['usJazz', 'usUpaisa', 'usNaya']),
+    ...wal('Daily available balance', ['dbJazz', 'dbUpaisa', 'dbNaya']),
+    { key: 'remarks', label: 'Sheet check', render: r => r.remarks ? <Badge tone="amber">{r.remarks}</Badge> : <span className="text-slate-300">—</span> },
   ]
   const PKR_ONLY: string[] = ['unconfirmedWd', 'charge', 'commission', 'topUp', 'sdpPaid', 'whrs']
   // "All agents" page: rows from several currencies / gateways, so say which one each row belongs to.
@@ -113,12 +116,16 @@ export default function AgentTable({ rows, showType, flag, onFlag, gateway, curr
 
   const exportCsv = () => {
     const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`
-    const bkkHead = ['Brand', 'Shop', 'Account', 'Status', 'SDP', 'Opening', 'Deposit JazzCash', 'Deposit UPaisa', 'Deposit NayaPay', 'Total deposit', 'Withdrawal', 'STLM/SPC', 'Top up', 'R.BAL', 'Balance',
-      'Dep status JazzCash', 'Dep status UPaisa', 'Dep status NayaPay', 'WD status JazzCash', 'WD status UPaisa', 'WD status NayaPay', 'Exceed', 'WD JazzCash', 'WD UPaisa', 'WD NayaPay']
+    const bkkHead = ['Brand', 'Shop', 'Account', 'Deposit status', 'SDP', 'Opening', 'R.BAL', 'Balance', 'Total deposit', 'Deposit JazzCash', 'Deposit UPaisa', 'Deposit NayaPay', 'Top up',
+      'Total withdrawal', 'Cash in JazzCash', 'Cash in UPaisa', 'Cash in NayaPay', 'Cash out JazzCash', 'Cash out UPaisa', 'Cash out NayaPay', 'Total special payment',
+      'Special JazzCash', 'Special UPaisa', 'Special NayaPay', 'Limit', 'Available JazzCash', 'Available UPaisa', 'Available NayaPay',
+      'Allocation JazzCash', 'Allocation UPaisa', 'Allocation NayaPay', 'Used JazzCash', 'Used UPaisa', 'Used NayaPay',
+      'Daily avail JazzCash', 'Daily avail UPaisa', 'Daily avail NayaPay', 'Sheet check']
     const head = isBkk ? bkkHead : ['Account', 'Type', 'Wallet', 'Status', 'ACT SDP', 'MRC LMT', 'Utilized limit', 'Opening', 'Deposit', 'Withdrawal', 'Adjustment', 'R.BAL', 'A.BAL', 'Discrep', 'Balance', 'High discrep', 'Limit exceeded', 'Limit status / Txn status', 'Remarks']
     const lines = filtered.map(r => (isBkk
-      ? [r.brand, r.shop, r.account, r.login, r.actSdp, r.opening, r.depJazz, r.depUpaisa, r.depNaya, r.deposit, r.withdrawal, r.stlm, r.topUp, r.rBal, r.health,
-        r.depStJazz, r.depStUpaisa, r.depStNaya, r.wdStJazz, r.wdStUpaisa, r.wdStNaya, r.limitStatus, r.wdJazz, r.wdUpaisa, r.wdNaya]
+      ? [r.brand, r.shop, r.account, r.login, r.actSdp, r.opening, r.rBal, r.health, r.deposit, r.depJazz, r.depUpaisa, r.depNaya, r.topUp,
+        r.withdrawal, r.wdJazz, r.wdUpaisa, r.wdNaya, r.coJazz, r.coUpaisa, r.coNaya, r.stlm, r.spJazz, r.spUpaisa, r.spNaya, r.limitStatus,
+        r.avJazz, r.avUpaisa, r.avNaya, r.alJazz, r.alUpaisa, r.alNaya, r.usJazz, r.usUpaisa, r.usNaya, r.dbJazz, r.dbUpaisa, r.dbNaya, r.remarks]
       : [r.account, r.group, r.wallet, r.login, r.actSdp, r.mrcLmt, r.utilizedLimit, r.opening, r.deposit, r.withdrawal, r.adjustment, r.rBal, r.aBal, r.discrep, r.health, r.highDiscrep, r.limitExceeded, isMcg ? r.code : r.limitStatus, r.remarks]).map(esc).join(','))
     const url = URL.createObjectURL(new Blob([[head.join(','), ...lines].join('\n')], { type: 'text/csv' }))
     const a = document.createElement('a'); a.href = url; a.download = 'agents.csv'; a.click(); URL.revokeObjectURL(url)
@@ -135,8 +142,8 @@ export default function AgentTable({ rows, showType, flag, onFlag, gateway, curr
       <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 p-3">
         <input className="input w-60" placeholder={isBkk ? 'Search account or shop…' : 'Search account, tag, remark…'} value={q} onChange={e => { setQ(e.target.value); setPage(0) }} />
         {isBkk ? sel(shop, setShop, 'All shops', shops) : sel(wallet, setWallet, 'All wallets', wallets)}
-        {sel(login, setLogin, 'All statuses', states)}
-        {sel(limitStatus, setLimitStatus, isMcg ? 'All txn statuses' : isBkk ? 'All exceed statuses' : 'All limit statuses', limitStatuses)}
+        {sel(login, setLogin, isBkk ? 'All deposit statuses' : 'All statuses', states)}
+        {sel(limitStatus, setLimitStatus, isMcg ? 'All txn statuses' : 'All limit statuses', limitStatuses)}
         <select className="input" value={flag} onChange={e => { onFlag(e.target.value as Flag); setPage(0) }}>
           <option value="all">All balances & alerts</option>
           <option value="high">Higher balance</option>

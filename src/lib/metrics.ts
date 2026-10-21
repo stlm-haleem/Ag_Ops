@@ -53,19 +53,21 @@ export const compact = (n: number) => {
 }
 
 /** PKR-BKK: every agent row carries three wallets, so wallet totals are summed from the per-wallet columns. */
-export interface BkkWalletStat { wallet: string; deposit: number; withdrawal: number; depEnabled: number; wdEnabled: number }
+export interface BkkWalletStat { wallet: string; deposit: number; withdrawal: number; cashOut: number; special: number; available: number; exceeded: number }
 export function byBkkWallet(rows: AgentRow[]): BkkWalletStat[] {
-  const defs: [string, 'depJazz' | 'depUpaisa' | 'depNaya', 'wdJazz' | 'wdUpaisa' | 'wdNaya', 'depStJazz' | 'depStUpaisa' | 'depStNaya', 'wdStJazz' | 'wdStUpaisa' | 'wdStNaya'][] = [
-    ['JAZZCASH', 'depJazz', 'wdJazz', 'depStJazz', 'wdStJazz'],
-    ['UPAISA', 'depUpaisa', 'wdUpaisa', 'depStUpaisa', 'wdStUpaisa'],
-    ['NAYAPAY', 'depNaya', 'wdNaya', 'depStNaya', 'wdStNaya'],
+  const defs: [string, 'depJazz' | 'depUpaisa' | 'depNaya', 'wdJazz' | 'wdUpaisa' | 'wdNaya', 'coJazz' | 'coUpaisa' | 'coNaya', 'spJazz' | 'spUpaisa' | 'spNaya', 'avJazz' | 'avUpaisa' | 'avNaya'][] = [
+    ['JAZZCASH', 'depJazz', 'wdJazz', 'coJazz', 'spJazz', 'avJazz'],
+    ['UPAISA', 'depUpaisa', 'wdUpaisa', 'coUpaisa', 'spUpaisa', 'avUpaisa'],
+    ['NAYAPAY', 'depNaya', 'wdNaya', 'coNaya', 'spNaya', 'avNaya'],
   ]
-  return defs.map(([wallet, d, w, ds, ws]) => ({
+  return defs.map(([wallet, d, w, c, sp, av]) => ({
     wallet,
     deposit: rows.reduce((s, r) => s + r[d], 0),
     withdrawal: rows.reduce((s, r) => s + r[w], 0),
-    depEnabled: rows.filter(r => r[ds] === 'Enable').length,
-    wdEnabled: rows.filter(r => r[ws] === 'Enable').length,
+    cashOut: rows.reduce((s, r) => s + r[c], 0),
+    special: rows.reduce((s, r) => s + r[sp], 0),
+    available: rows.reduce((s, r) => s + r[av], 0),
+    exceeded: rows.filter(r => r[av] < 0).length,
   }))
 }
 
